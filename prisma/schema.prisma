@@ -1,0 +1,34 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String   // Hashed password
+  deviceId  String?  // Optional device-based identification for migration
+  supabaseId String? @unique // Supabase user ID for integration
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // User data
+  goal           String?
+  timeline       String?
+  timeCommitment String?
+  answers        String? // JSON string
+  roadmap        String? // JSON string
+  completedTasks String? // JSON string
+  streakData     String? // JSON string
+  taskTimers     String? // JSON string
+  lastSyncAt     DateTime?
+
+  @@map("users")
+}
