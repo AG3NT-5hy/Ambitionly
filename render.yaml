@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: ambitionly-backend
+    env: node
+    plan: free
+    buildCommand: npm install && npm run db:generate
+    startCommand: npm run start:server
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: PORT
+        value: 3000
+      - key: NODE_ENV
+        value: production
+

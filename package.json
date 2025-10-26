@@ -8,6 +8,8 @@
     "start-web-dev": "DEBUG=expo* expo start --web",
     "dev": "tsx server.ts",
     "start:backend": "tsx server.ts",
+    "start:server": "tsx server.ts",
+    "build": "npm install && npm run db:generate",
     "lint": "expo lint",
     "db:generate": "npx prisma generate",
     "db:push": "npx prisma db push",

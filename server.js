@@ -1,12 +1,18 @@
-import { serve } from '@hono/node-server'
-import app from './backend/hono.ts'
+// Compiled server for production use
+require('@swc/register');
 
-const port = 3000
-console.log(`🚀 Server is running on port ${port}`)
-console.log(`📧 Email API available at: http://localhost:${port}/api/emails`)
-console.log(`🔧 tRPC API available at: http://localhost:${port}/api/trpc`)
+const { serve } = require('@hono/node-server');
+const app = require('./backend/hono.ts');
+
+const port = process.env.PORT || 3000;
+const host = process.env.HOST || '0.0.0.0';
+
+console.log(`🚀 Server is running on port ${port}`);
+console.log(`📧 Email API available at: http://localhost:${port}/api/emails`);
+console.log(`🔧 tRPC API available at: http://localhost:${port}/api/trpc`);
 
 serve({
   fetch: app.fetch,
-  port
-})
+  port,
+  hostname: host
+});
