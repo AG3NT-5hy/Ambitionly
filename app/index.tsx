@@ -2,13 +2,18 @@ import React, { useEffect, useState, useRef } from 'react';
 import { View, StyleSheet, Image, useWindowDimensions, Animated } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
-import { useAmbition } from '@/hooks/ambition-store';
+import { useAmbition } from '../hooks/ambition-store';
 
 
 
 export default function SplashScreen() {
-  const { goal, roadmap, isHydrated } = useAmbition();
+  const ambitionData = useAmbition();
   const [imageLoaded, setImageLoaded] = useState(false);
+  
+  // Safely destructure with fallbacks
+  const goal = ambitionData?.goal || '';
+  const roadmap = ambitionData?.roadmap || null;
+  const isHydrated = ambitionData?.isHydrated || false;
 
   const { width } = useWindowDimensions();
   const animatedValue = useRef(new Animated.Value(0)).current;
@@ -77,7 +82,8 @@ export default function SplashScreen() {
     const timer = setTimeout(() => {
       try {
         // Check if user has existing goal and roadmap
-        if (goal && roadmap) {
+        // Add null checks to prevent undefined errors
+        if (goal && roadmap && typeof goal === 'string' && typeof roadmap === 'object') {
           console.log('Existing goal found, navigating to roadmap');
           router.replace('/(main)/roadmap');
         } else {
@@ -98,8 +104,8 @@ export default function SplashScreen() {
 
 
 
-  // Show loading state until hydrated
-  if (!isHydrated) {
+  // Show loading state until hydrated or if ambition data is not available
+  if (!isHydrated || !ambitionData) {
     return (
       <View style={styles.container}>
         <LinearGradient

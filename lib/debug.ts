@@ -4,7 +4,7 @@ import Constants from 'expo-constants';
 import * as Application from 'expo-application';
 import * as Device from 'expo-device';
 import NetInfo from '@react-native-community/netinfo';
-import type { SubscriptionState } from '@/hooks/subscription-store';
+import type { SubscriptionState } from '../hooks/subscription-store'
 
 export interface DebugInfo {
   app: {

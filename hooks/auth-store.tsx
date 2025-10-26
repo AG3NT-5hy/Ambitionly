@@ -1,8 +1,8 @@
 import createContextHook from '@nkzw/create-context-hook';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useState, useEffect, useCallback } from 'react';
-import { trpc } from '@/lib/trpc';
-import { useUi } from '@/providers/UiProvider';
+import { trpc } from '../lib/trpc'
+import { useUi } from '../providers/UiProvider'
 
 const STORAGE_KEYS = {
   AUTH_TOKEN: 'ambitionly_auth_token',

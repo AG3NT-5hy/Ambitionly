@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Animated, ScrollView, Platform, Modal } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Target, Flame, ChevronRight, Play, Clock, Lock } from 'lucide-react-native';
@@ -26,6 +26,20 @@ export default function RoadmapScreen() {
     getStreak, 
     isTaskUnlocked 
   } = useAmbition();
+
+  // Debug completedTasks changes
+  useEffect(() => {
+    console.log('[Roadmap] completedTasks changed:', completedTasks);
+  }, [completedTasks]);
+
+  // Debug roadmap changes
+  useEffect(() => {
+    console.log('[Roadmap] roadmap changed:', {
+      hasRoadmap: !!roadmap,
+      phasesCount: roadmap?.phases?.length,
+      roadmapId: roadmap?.id
+    });
+  }, [roadmap]);
   const { shouldShowPaywall } = useSubscription();
   const { isSignedUp, signUp } = useUser();
   const { showToast } = useUi();
@@ -37,20 +51,21 @@ export default function RoadmapScreen() {
   const [paywallDismissed, setPaywallDismissed] = useState<boolean>(false);
   const [showSignUpModal, setShowSignUpModal] = useState<boolean>(false);
   const [hasCheckedSignUp, setHasCheckedSignUp] = useState<boolean>(false);
+  
+  // Track the current task to prevent unexpected changes
+  const currentTaskRef = useRef<Task | null>(null);
+  const [stableTask, setStableTask] = useState<Task | null>(null);
 
   useEffect(() => {
-    // Use more conservative animation settings for Android
-    const animationDuration = Platform.OS === 'android' ? 400 : 600;
-    
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: animationDuration,
+        duration: 600,
         useNativeDriver: true,
       }),
       Animated.timing(slideAnim, {
         toValue: 0,
-        duration: animationDuration,
+        duration: 600,
         useNativeDriver: true,
       }),
     ]).start();
@@ -68,17 +83,6 @@ export default function RoadmapScreen() {
   const progress = getProgress();
   const streak = getStreak();
   const shouldShowPaywallNow = shouldShowPaywall(completedTasks.length);
-  
-  // Debug subscription state on Android
-  useEffect(() => {
-    if (Platform.OS === 'android') {
-      console.log('[Android Debug] Subscription state:', {
-        completedTasksCount: completedTasks.length,
-        shouldShowPaywall: shouldShowPaywallNow,
-        isHydrated: true // Add subscription hydration check if needed
-      });
-    }
-  }, [completedTasks.length, shouldShowPaywallNow]);
 
   // Show sign-up modal on first visit if user hasn't signed up
   useEffect(() => {
@@ -99,12 +103,20 @@ export default function RoadmapScreen() {
 
 
 
-  const getTodaysTask = () => {
-    if (!roadmap?.phases) return null;
+  const getTodaysTask = useCallback(() => {
+    console.log('[Roadmap] getTodaysTask called');
+    console.log('[Roadmap] Dependencies:', {
+      roadmapPhases: roadmap?.phases?.length,
+      completedTasksCount: completedTasks.length,
+      completedTasks: completedTasks
+    });
     
-    // Collect all unlocked, incomplete tasks
-    const availableTasks: { task: Task; phaseIndex: number; milestoneIndex: number; taskIndex: number; estimatedMinutes: number }[] = [];
+    if (!roadmap?.phases) {
+      console.log('[Roadmap] No roadmap phases available');
+      return null;
+    }
     
+    // Find the first unlocked, incomplete task in natural roadmap order
     for (let phaseIndex = 0; phaseIndex < roadmap.phases.length; phaseIndex++) {
       const phase = roadmap.phases[phaseIndex];
       for (let milestoneIndex = 0; milestoneIndex < phase.milestones.length; milestoneIndex++) {
@@ -112,81 +124,72 @@ export default function RoadmapScreen() {
         for (let taskIndex = 0; taskIndex < milestone.tasks.length; taskIndex++) {
           const task = milestone.tasks[taskIndex];
           
-          // Check if task is not completed and is unlocked
-          if (!completedTasks.includes(task.id) && isTaskUnlocked(phaseIndex, milestoneIndex, taskIndex)) {
-            // Parse estimated time to minutes for sorting
-            const estimatedMinutes = parseTimeToMinutes(task.estimatedTime || '30 min');
-            availableTasks.push({ task, phaseIndex, milestoneIndex, taskIndex, estimatedMinutes });
+          const isCompleted = completedTasks.includes(task.id);
+          const isUnlocked = isTaskUnlocked(phaseIndex, milestoneIndex, taskIndex);
+          
+          console.log(`[Roadmap] Checking task: ${task.title}`, {
+            taskId: task.id,
+            isCompleted,
+            isUnlocked,
+            phaseIndex,
+            milestoneIndex,
+            taskIndex
+          });
+          
+          // Return the first task that is not completed and is unlocked
+          if (!isCompleted && isUnlocked) {
+            console.log(`[Roadmap] Selected task: ${task.title} (${task.id})`);
+            return task;
           }
         }
       }
     }
     
-    if (availableTasks.length === 0) {
-      return null; // All tasks completed or none unlocked
+    console.log('[Roadmap] No available tasks found');
+    return null; // All tasks completed
+  }, [roadmap?.phases, completedTasks, isTaskUnlocked]);
+
+  const todaysTask = useMemo(() => {
+    console.log('[Roadmap] todaysTask useMemo triggered');
+    const task = getTodaysTask();
+    
+    // Only update the stable task if it's actually different
+    if (task && (!currentTaskRef.current || currentTaskRef.current.id !== task.id)) {
+      console.log(`[Roadmap] Task changed from ${currentTaskRef.current?.id} to ${task.id}`);
+      currentTaskRef.current = task;
+      setStableTask(task);
+    } else if (!task && currentTaskRef.current) {
+      console.log('[Roadmap] Task cleared');
+      currentTaskRef.current = null;
+      setStableTask(null);
     }
     
-    // Sort by estimated time (shortest first), then by original order as tiebreaker
-    availableTasks.sort((a, b) => {
-      if (a.estimatedMinutes !== b.estimatedMinutes) {
-        return a.estimatedMinutes - b.estimatedMinutes;
-      }
-      // Tiebreaker: maintain original order (phase -> milestone -> task)
-      if (a.phaseIndex !== b.phaseIndex) return a.phaseIndex - b.phaseIndex;
-      if (a.milestoneIndex !== b.milestoneIndex) return a.milestoneIndex - b.milestoneIndex;
-      return a.taskIndex - b.taskIndex;
-    });
-    
-    return availableTasks[0].task;
-  };
-
-  // Helper function to parse time string to minutes (same logic as in ambition-store)
-  const parseTimeToMinutes = (timeStr: string): number => {
-    const lowerTime = timeStr.toLowerCase().trim();
-    let estimatedMinutes: number;
-    
-    if (lowerTime.includes('h')) {
-      // Handle hours (e.g., "1.5 h", "2 h")
-      const hourMatch = lowerTime.match(/([0-9.]+)\s*h/);
-      if (hourMatch) {
-        const hours = parseFloat(hourMatch[1]);
-        estimatedMinutes = Math.round(hours * 60);
-      } else {
-        estimatedMinutes = 60; // default to 1 hour
-      }
-    } else if (lowerTime.includes('min')) {
-      // Handle minutes (e.g., "45 min", "30 min")
-      const minMatch = lowerTime.match(/([0-9]+)\s*min/);
-      if (minMatch) {
-        estimatedMinutes = parseInt(minMatch[1]);
-      } else {
-        estimatedMinutes = 30; // default to 30 minutes
-      }
+    if (task) {
+      console.log(`[Roadmap] Today's task:`, {
+        id: task.id,
+        title: task.title,
+        estimatedTime: task.estimatedTime,
+        description: task.description
+      });
     } else {
-      // Try to extract any number and assume it's minutes
-      const numberMatch = lowerTime.match(/([0-9]+)/);
-      if (numberMatch) {
-        estimatedMinutes = parseInt(numberMatch[1]);
-      } else {
-        estimatedMinutes = 30; // default to 30 minutes
-      }
+      console.log('[Roadmap] No task selected');
     }
-    
-    return estimatedMinutes;
-  };
+    return task;
+  }, [getTodaysTask]);
 
-  const todaysTask = getTodaysTask();
+  // Use stable task for display to prevent glitching
+  const displayTask = stableTask || todaysTask;
 
-  const handleStartTimer = async (taskId: string, estimatedTime: string) => {
+  const handleStartTimer = useCallback(async (taskId: string, estimatedTime: string) => {
     if (!estimatedTime?.trim()) {
       console.warn('Invalid estimated time provided');
       return;
     }
     const sanitizedTime = estimatedTime.trim().slice(0, 20);
     await startTaskTimer(taskId, sanitizedTime);
-  };
+  }, [startTaskTimer]);
 
-  const handleTaskToggle = async (taskId: string) => {
+  const handleTaskToggle = useCallback(async (taskId: string) => {
     try {
       // Find the task indices to validate it's unlocked
       let canToggle = false;
@@ -242,9 +245,9 @@ export default function RoadmapScreen() {
     } catch (error) {
       console.error('Error toggling task:', error);
     }
-  };
+  }, [roadmap?.phases, isTaskUnlocked, toggleTask, completedTasks, showToast]);
 
-  const formatTimeRemaining = (elapsed: number, total: number): string => {
+  const formatTimeRemaining = useCallback((elapsed: number, total: number): string => {
     const remaining = Math.max(0, total - elapsed);
     const minutes = Math.floor(remaining / (1000 * 60));
     const seconds = Math.floor((remaining % (1000 * 60)) / 1000);
@@ -252,9 +255,9 @@ export default function RoadmapScreen() {
     console.log(`[Timer Display] Elapsed: ${elapsed}ms, Total: ${total}ms, Remaining: ${remaining}ms, Display: ${minutes}:${seconds.toString().padStart(2, '0')}`);
     
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-  };
+  }, []);
 
-  const renderTaskTimer = (taskId: string) => {
+  const renderTaskTimer = useCallback((taskId: string) => {
     const timer = getTaskTimer(taskId);
     
     if (!timer || timer.isCompleted || !timer.isActive) return null;
@@ -276,7 +279,7 @@ export default function RoadmapScreen() {
         </View>
       </View>
     );
-  };
+  }, [getTaskTimer, getTaskTimerProgress, isTaskTimerComplete, formatTimeRemaining]);
 
   if (!roadmap) {
     return (
@@ -384,7 +387,11 @@ export default function RoadmapScreen() {
                       return (
                         <TouchableOpacity
                           style={styles.startTimerButton}
-                          onPress={() => handleStartTimer(todaysTask.id, todaysTask.estimatedTime || '30 min')}
+                          onPress={() => {
+                            const timeToUse = todaysTask.estimatedTime || '20 min';
+                            console.log(`[Roadmap] Starting timer with time: "${timeToUse}" (original: "${todaysTask.estimatedTime}")`);
+                            handleStartTimer(todaysTask.id, timeToUse);
+                          }}
                           accessibilityLabel="Start task timer"
                           testID="start-timer"
                         >
@@ -541,19 +548,10 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    paddingBottom: Platform.select({
-      android: 60, // Extra padding for Android navigation
-      ios: 40,
-      default: 40,
-    }),
+    paddingBottom: 40,
   },
   content: {
     paddingHorizontal: 20,
-    ...Platform.select({
-      android: {
-        paddingTop: 10, // Extra top padding for Android status bar
-      },
-    }),
   },
   loadingContainer: {
     flex: 1,

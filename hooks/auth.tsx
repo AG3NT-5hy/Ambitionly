@@ -1,7 +1,7 @@
 import createContextHook from '@nkzw/create-context-hook';
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { Platform } from 'react-native';
-import { supabase, signInWithEmail, signUpWithEmail, sendPasswordReset, signOut as sbSignOut, signInWithGoogle, signInWithApple } from '@/lib/supabase';
+import { supabase, signInWithEmail, signUpWithEmail, sendPasswordReset, signOut as sbSignOut, signInWithGoogle, signInWithApple } from '../lib/supabase'
 
 export type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated';
 

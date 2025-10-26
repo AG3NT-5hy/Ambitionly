@@ -4,7 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Send, Bot, User } from 'lucide-react-native';
-import { useAmbition } from '@/hooks/ambition-store';
+import { useAmbition } from '../hooks/ambition-store'
 
 interface Message {
   id: string;

@@ -2,23 +2,26 @@ import React, { useRef, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Platform, Modal } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { CheckCircle2, Circle, ArrowLeft, Lock, Play, Clock } from 'lucide-react-native';
-import { useAmbition } from '@/hooks/ambition-store';
-import { useSubscription } from '@/hooks/subscription-store';
+import { useAmbition } from '../hooks/ambition-store'
+import { useSubscription } from '../hooks/subscription-store'
 import { router, Stack } from 'expo-router';
 import { BlurView } from 'expo-blur';
-import PaywallScreen from '@/components/PaywallScreen';
-import { useUi } from '@/providers/UiProvider';
+import PaywallScreen from '../components/PaywallScreen'
+import { useUi } from '../providers/UiProvider'
 
 export default function PhasesScreen() {
   const { 
     roadmap, 
     completedTasks, 
+    taskTimers,
     toggleTask, 
     isTaskUnlocked, 
     isMilestoneUnlocked, 
     isPhaseUnlocked,
     startTaskTimer,
+    stopTaskTimer,
     getTaskTimer,
+    getAllActiveTimers,
     isTaskTimerComplete,
     getTaskTimerProgress
   } = useAmbition();
@@ -67,7 +70,17 @@ export default function PhasesScreen() {
     return () => clearInterval(interval);
   }, []);
 
+  // Monitor timer state changes
+  useEffect(() => {
+    console.log(`[Phases] Timer state changed:`, {
+      allTimers: taskTimers.map(t => ({ id: t.taskId, active: t.isActive, completed: t.isCompleted })),
+      activeCount: getAllActiveTimers().length
+    });
+  }, [taskTimers, getAllActiveTimers]);
+
   const handleTaskAction = async (taskId: string, phaseIndex: number, milestoneIndex: number, taskIndex: number, estimatedTime: string) => {
+    console.log(`[Phases] handleTaskAction called for task ${taskId}`);
+    
     // Input validation
     if (!estimatedTime?.trim()) {
       console.warn('Invalid estimated time provided');
@@ -77,22 +90,61 @@ export default function PhasesScreen() {
     
     // Only allow action if task is unlocked
     if (!isTaskUnlocked(phaseIndex, milestoneIndex, taskIndex)) {
+      console.log(`[Phases] Task ${taskId} is not unlocked, ignoring action`);
       return;
     }
 
     const timer = getTaskTimer(taskId);
     const isCompleted = completedTasks.includes(taskId);
     
-    // If task is already completed, allow unchecking
+    console.log(`[Phases] Task ${taskId} state:`, {
+      hasTimer: !!timer,
+      timerActive: timer?.isActive,
+      isCompleted,
+      allActiveTimers: getAllActiveTimers().map(t => t.taskId),
+      allTimers: taskTimers.map(t => ({ id: t.taskId, active: t.isActive }))
+    });
+    
+    // If task is already completed, prevent restarting
     if (isCompleted) {
-      await toggleTask(taskId);
+      console.log(`[Phases] Task ${taskId} is already completed, preventing restart`);
+      showToast('This task is already completed. Move on to the next task!', 'info');
       return;
     }
     
     // If no timer exists, start the timer
     if (!timer) {
+      // Check if another task already has an active timer
+      const activeTimers = getAllActiveTimers();
+      if (activeTimers.length > 0) {
+        const activeTaskId = activeTimers[0].taskId;
+        console.log(`[Phases] Another task ${activeTaskId} already has an active timer`);
+        showToast('Please complete the current task before starting a new one.', 'warning');
+        return;
+      }
+      
+      console.log(`[Phases] Starting new timer for task ${taskId}`);
       await startTaskTimer(taskId, sanitizedTime);
       showToast(`Timer started for ${sanitizedTime}`, 'success');
+      return;
+    }
+    
+    // If timer exists but is not active, start it again
+    if (timer && !timer.isActive) {
+      console.log(`[Phases] Restarting inactive timer for task ${taskId}`);
+      await startTaskTimer(taskId, sanitizedTime);
+      showToast(`Timer restarted for ${sanitizedTime}`, 'success');
+      return;
+    }
+    
+    // If timer exists and is active but not complete, show progress
+    if (timer && timer.isActive && !isTaskTimerComplete(taskId)) {
+      console.log(`[Phases] Showing progress for active timer on task ${taskId}`);
+      const progress = getTaskTimerProgress(taskId);
+      const remainingMs = progress.total - progress.elapsed;
+      const remainingMinutes = Math.ceil(remainingMs / (1000 * 60));
+      
+      showToast(`Timer running: ${remainingMinutes} minute(s) remaining`, 'info');
       return;
     }
     
@@ -102,13 +154,6 @@ export default function PhasesScreen() {
       if (success) {
         showToast('Great job! Task completed.', 'success');
       }
-    } else {
-      // Timer is running but not complete yet
-      const progress = getTaskTimerProgress(taskId);
-      const remainingMs = progress.total - progress.elapsed;
-      const remainingMinutes = Math.ceil(remainingMs / (1000 * 60));
-      
-      showToast(`Please wait ${remainingMinutes} more minute(s) before completing.`, 'warning');
     }
   };
 
@@ -307,9 +352,12 @@ export default function PhasesScreen() {
                                         style={[
                                           styles.taskButton,
                                           isCompleted && styles.taskButtonCompleted,
+                                          isCompleted && styles.taskButtonDisabled,
                                         ]}
                                         onPress={() => handleTaskAction(task.id, phaseIndex, milestoneIndex, taskIndex, task.estimatedTime)}
+                                        disabled={isCompleted}
                                         accessibilityRole="button"
+                                        accessibilityLabel={isCompleted ? "Task completed" : `Start task: ${task.title}`}
                                         testID={`task-button-${task.id}`}
                                       >
                                         {(() => {
@@ -524,6 +572,9 @@ const styles = StyleSheet.create({
   taskButtonCompleted: {
     backgroundColor: '#1A4D3A',
     borderColor: '#32D583',
+  },
+  taskButtonDisabled: {
+    opacity: 0.6,
   },
   taskButtonContent: {
     flexDirection: 'row',

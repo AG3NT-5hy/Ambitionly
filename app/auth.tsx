@@ -4,7 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X, Mail, Lock, Eye, EyeOff } from 'lucide-react-native';
-import { useAuth } from '@/hooks/auth-store';
+import { useAuth } from '../hooks/auth-store'
 
 export default function AuthScreen() {
   const { signup, login, dismissAuthFlow } = useAuth();

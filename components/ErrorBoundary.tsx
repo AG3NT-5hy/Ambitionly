@@ -2,7 +2,7 @@ import React, { Component, ReactNode } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AlertTriangle, RefreshCw } from 'lucide-react-native';
-import { reportError } from '@/lib/error-reporting';
+import { reportError } from '../lib/error-reporting'
 
 interface Props {
   children: ReactNode;

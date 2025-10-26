@@ -2,7 +2,8 @@ import createContextHook from '@nkzw/create-context-hook';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Platform } from 'react-native';
-import { analytics } from '@/lib/analytics';
+import { analytics } from '../lib/analytics';
+import Purchases from 'react-native-purchases';
 
 export type SubscriptionPlan = 'free' | 'monthly' | 'annual' | 'lifetime';
 
@@ -24,7 +25,61 @@ export const [SubscriptionProvider, useSubscription] = createContextHook(() => {
     isActive: false,
   });
 
-  // Load subscription state from storage on init
+  // Sync subscription status from RevenueCat
+  const syncRevenueCatStatus = useCallback(async (): Promise<boolean> => {
+    try {
+      // Check if RevenueCat is configured
+      const isConfigured = await Purchases.isConfigured();
+      if (!isConfigured) {
+        console.log('[Subscription] RevenueCat not configured, skipping sync');
+        return false;
+      }
+
+      console.log('[Subscription] Syncing with RevenueCat...');
+      const customerInfo = await Purchases.getCustomerInfo();
+      
+      // Check for active entitlements
+      // Using 'premium_access' entitlement (configured in RevenueCat dashboard)
+      const hasActiveSubscription = customerInfo.entitlements.active['premium_access'] !== undefined;
+      
+      if (hasActiveSubscription) {
+        const entitlement = customerInfo.entitlements.active['premium_access'];
+        
+        // Determine subscription plan from product identifier
+        let plan: SubscriptionPlan = 'annual';
+        const productId = entitlement.productIdentifier?.toLowerCase() || '';
+        
+        if (productId.includes('monthly') || productId.includes('month')) {
+          plan = 'monthly';
+        } else if (productId.includes('annual') || productId.includes('year')) {
+          plan = 'annual';
+        } else if (productId.includes('lifetime')) {
+          plan = 'lifetime';
+        }
+        
+        const newState: SubscriptionState = {
+          plan,
+          isActive: true,
+          expiresAt: entitlement.expirationDate ? new Date(entitlement.expirationDate) : undefined,
+          purchasedAt: entitlement.originalPurchaseDate ? new Date(entitlement.originalPurchaseDate) : new Date(),
+        };
+        
+        await AsyncStorage.setItem(STORAGE_KEYS.SUBSCRIPTION_STATE, JSON.stringify(newState));
+        setSubscriptionStateInternal(newState);
+        
+        console.log('[Subscription] ✅ Active subscription found:', plan);
+        return true;
+      } else {
+        console.log('[Subscription] No active subscription found in RevenueCat');
+        return false;
+      }
+    } catch (error) {
+      console.log('[Subscription] RevenueCat sync error (this is normal in Expo Go):', error);
+      return false;
+    }
+  }, []);
+
+  // Load subscription state from storage on init and sync with RevenueCat
   useEffect(() => {
     let isMounted = true;
     
@@ -60,6 +115,9 @@ export const [SubscriptionProvider, useSubscription] = createContextHook(() => {
           }
         }
         
+        // Sync with RevenueCat to ensure we have the latest subscription status
+        await syncRevenueCatStatus();
+        
         setIsHydrated(true);
       } catch (error) {
         console.error('Error loading subscription state:', error);
@@ -74,7 +132,7 @@ export const [SubscriptionProvider, useSubscription] = createContextHook(() => {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [syncRevenueCatStatus]);
 
   const setSubscriptionState = useCallback(async (newState: SubscriptionState) => {
     // Input validation
@@ -248,6 +306,7 @@ export const [SubscriptionProvider, useSubscription] = createContextHook(() => {
     isSubscriptionActive,
     canAccessPremiumFeatures,
     shouldShowPaywall,
+    syncRevenueCatStatus,
   }), [
     isHydrated,
     subscriptionState,
@@ -260,5 +319,6 @@ export const [SubscriptionProvider, useSubscription] = createContextHook(() => {
     isSubscriptionActive,
     canAccessPremiumFeatures,
     shouldShowPaywall,
+    syncRevenueCatStatus,
   ]);
 });

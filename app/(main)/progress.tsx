@@ -3,8 +3,8 @@ import { View, Text, StyleSheet, ScrollView, Animated, Dimensions, RefreshContro
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Trophy, Target, Calendar, Flame, TrendingUp, Award } from 'lucide-react-native';
-import { useAmbition } from '@/hooks/ambition-store';
-import { SkeletonBlock } from '@/components/Skeleton';
+import { useAmbition } from '../../hooks/ambition-store';
+import { SkeletonBlock } from '../../components/Skeleton';
 
 const { width } = Dimensions.get('window');
 

@@ -31,7 +31,7 @@ export function Skeleton({ width = '100%', height = 14, borderRadius = 8, style,
   return (
     <Animated.View
       testID={testID ?? 'skeleton'}
-      style={[styles.base, { width, height, borderRadius, backgroundColor }, style]}
+      style={[styles.base, { width: width as any, height: height as any, borderRadius, backgroundColor }, style]}
     />
   );
 }

@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, Image, Animated, Dimensions, TouchableOpacity, 
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useAmbition } from '@/hooks/ambition-store';
+import { useAmbition } from '../hooks/ambition-store'
 import { AlertTriangle, RefreshCw } from 'lucide-react-native';
 
 export default function GeneratingScreen() {
@@ -16,6 +16,8 @@ export default function GeneratingScreen() {
   const styles = createStyles(screenWidth, screenHeight);
   const [error, setError] = useState<string | null>(null);
   const [isRetrying, setIsRetrying] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const hasGeneratedRef = useRef(false);
   
   // Image URIs
   const logoUri = 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/cixvx1m8voutz5e0sag12';
@@ -163,30 +165,50 @@ export default function GeneratingScreen() {
     startRotation();
     startBackgroundAnimations();
     
-    // Generate roadmap and navigate immediately
+    // Generate roadmap and navigate immediately (only once)
     const generateAndNavigate = async () => {
+      if (hasGeneratedRef.current || isGenerating) {
+        console.log('[Generating] Already generating or generated, skipping');
+        return;
+      }
+      
       try {
+        console.log('[Generating] Starting roadmap generation');
+        hasGeneratedRef.current = true;
+        setIsGenerating(true);
         setError(null);
         await generateRoadmap();
+        console.log('[Generating] Roadmap generation completed, navigating');
         // Navigate immediately after generation completes
         router.replace('/(main)/roadmap');
       } catch (error) {
         console.error('Error generating roadmap:', error);
         const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
         setError(errorMessage);
+        hasGeneratedRef.current = false; // Allow retry
+        setIsGenerating(false);
         // Don't navigate on error, let user retry
       }
     };
 
     generateAndNavigate();
-  }, [generateRoadmap, rotationAnim, backgroundAnim1, backgroundAnim2, backgroundAnim3, backgroundAnim4, backgroundAnim5, backgroundAnim6, colorShiftAnim]);
+  }, []); // Empty dependency array - only run once on mount
   
   const handleRetry = async () => {
+    if (isGenerating) {
+      console.log('[Generating] Already generating, skipping retry');
+      return;
+    }
+    
     setIsRetrying(true);
     setError(null);
+    hasGeneratedRef.current = false; // Reset flag for retry
     
     try {
+      console.log('[Generating] Starting retry generation');
+      setIsGenerating(true);
       await generateRoadmap();
+      console.log('[Generating] Retry generation completed, navigating');
       router.replace('/(main)/roadmap');
     } catch (error) {
       console.error('Error generating roadmap on retry:', error);
@@ -194,6 +216,7 @@ export default function GeneratingScreen() {
       setError(errorMessage);
     } finally {
       setIsRetrying(false);
+      setIsGenerating(false);
     }
   };
   
@@ -532,16 +555,6 @@ export default function GeneratingScreen() {
               </View>
             ) : (
               <View style={styles.bottomContent}>
-                <View style={styles.progressIndicator}>
-                  <View style={styles.progressBar}>
-                    <LinearGradient
-                      colors={['#29202b', '#8B5CF6', '#A855F7']}
-                      style={styles.progressFill}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 0 }}
-                    />
-                  </View>
-                </View>
                 <Text style={styles.progressText}>Your Personalized Journey Awaits</Text>
               </View>
             )}
@@ -789,21 +802,6 @@ const createStyles = (screenWidth: number, screenHeight: number) => StyleSheet.c
     marginTop: 48,
     alignItems: 'center',
     width: '100%',
-  },
-  progressIndicator: {
-    width: '80%',
-    marginBottom: 16,
-  },
-  progressBar: {
-    height: 4,
-    backgroundColor: '#333333',
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    width: '65%',
-    borderRadius: 2,
   },
   progressText: {
     fontSize: 14,

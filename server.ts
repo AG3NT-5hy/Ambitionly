@@ -1,0 +1,16 @@
+import { serve } from '@hono/node-server'
+import app from './backend/hono'
+
+// Railway and other platforms provide PORT env variable
+const port = process.env.PORT ? parseInt(process.env.PORT) : 3000
+const host = process.env.HOST || '0.0.0.0'
+
+console.log(`🚀 Server is running on port ${port}`)
+console.log(`📧 Email API available at: http://localhost:${port}/api/emails`)
+console.log(`🔧 tRPC API available at: http://localhost:${port}/api/trpc`)
+
+serve({
+  fetch: app.fetch,
+  port,
+  hostname: host
+})

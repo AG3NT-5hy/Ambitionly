@@ -1,4 +1,4 @@
-import { AppError, NetworkError, TimeoutError, ValidationError, isRetryableStatus } from '@/lib/errors';
+import { AppError, NetworkError, TimeoutError, ValidationError, isRetryableStatus } from '../lib/errors'
 
 export interface RequestOptions extends RequestInit {
   timeoutMs?: number;
@@ -96,7 +96,10 @@ export async function httpRequest<T = unknown>(url: string, options: RequestOpti
       return { ok: true, status: res.status, data };
     } catch (e: unknown) {
       clearTimeout(timer);
-      const isAbort = e instanceof DOMException && e.name === 'AbortError';
+      // Check for abort error in a React Native compatible way
+      const isAbort = (e as any)?.name === 'AbortError' || 
+                     (e as any)?.message?.includes('aborted') ||
+                     (e as any)?.message?.includes('cancelled');
       const err = isAbort ? new TimeoutError('Request timed out', { cause: e }) : new NetworkError('Network request failed', { cause: e });
       lastError = err;
 

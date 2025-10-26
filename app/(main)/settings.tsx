@@ -1,13 +1,14 @@
-import React, { useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, Animated, Alert } from 'react-native';
+import React, { useRef, useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, Animated, Alert, Modal } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { User, Bell, Palette, Info, RefreshCw, Trash2, Code, ChevronRight, Crown, LogOut } from 'lucide-react-native';
-import { useAmbition } from '@/hooks/ambition-store';
-import { useSubscription } from '@/hooks/subscription-store';
-import { useUser } from '@/hooks/user-store';
+import { User, Bell, Palette, Info, RefreshCw, Trash2, Code, ChevronRight, Crown, LogOut, X, Calendar, CreditCard } from 'lucide-react-native';
+import { useAmbition } from '../../hooks/ambition-store'
+import { useSubscription } from '../../hooks/subscription-store'
+import { useUser } from '../../hooks/user-store'
 import { router } from 'expo-router';
-import { useUi } from '@/providers/UiProvider';
+import { useUi } from '../../providers/UiProvider'
+import PaywallScreen from '../../components/PaywallScreen'
 
 export default function SettingsScreen() {
   const { clearAllData, resetProgress } = useAmbition();
@@ -19,6 +20,10 @@ export default function SettingsScreen() {
 
   const [notificationsEnabled, setNotificationsEnabled] = React.useState(true);
   const [darkModeEnabled, setDarkModeEnabled] = React.useState(true);
+  const [showPaywallModal, setShowPaywallModal] = useState(false);
+  const [showSubscriptionDetailsModal, setShowSubscriptionDetailsModal] = useState(false);
+  const [versionTapCount, setVersionTapCount] = useState(0);
+  const [showDevSettings, setShowDevSettings] = useState(__DEV__);
 
   useEffect(() => {
     Animated.parallel([
@@ -83,50 +88,26 @@ export default function SettingsScreen() {
     router.push('/dev-settings');
   };
 
+  const handleVersionTap = () => {
+    const newCount = versionTapCount + 1;
+    setVersionTapCount(newCount);
+    
+    if (newCount >= 7) {
+      setShowDevSettings(true);
+      setVersionTapCount(0);
+      showToast('Developer settings unlocked!', 'success');
+    } else if (newCount >= 3) {
+      showToast(`Tap ${7 - newCount} more times to unlock developer settings`, 'info');
+    }
+  };
+
   const handleManageSubscription = () => {
     if (isSubscriptionActive()) {
-      Alert.alert(
-        'Manage Subscription',
-        'To cancel or modify your subscription, please go to your device\'s App Store settings.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Cancel Subscription',
-            style: 'destructive',
-            onPress: async () => {
-              try {
-                await cancelSubscription();
-                showToast('Subscription cancelled', 'success');
-              } catch {
-                showToast('Failed to cancel subscription', 'error');
-              }
-            },
-          },
-        ]
-      );
+      // Show subscription details modal for active subscribers
+      setShowSubscriptionDetailsModal(true);
     } else {
-      Alert.alert(
-        'Restore Subscription',
-        'Restore your previous purchases if you have an active subscription.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Restore',
-            onPress: async () => {
-              try {
-                const restored = await restoreSubscription();
-                if (restored) {
-                  showToast('Subscription restored!', 'success');
-                } else {
-                  showToast('No active subscription found', 'warning');
-                }
-              } catch {
-                showToast('Failed to restore subscription', 'error');
-              }
-            },
-          },
-        ]
-      );
+      // Show paywall for free plan users
+      setShowPaywallModal(true);
     }
   };
 
@@ -359,7 +340,14 @@ export default function SettingsScreen() {
                   }}
                   showChevron
                 />
-                {__DEV__ && (
+                <TouchableOpacity 
+                  style={styles.versionTapArea}
+                  onPress={handleVersionTap}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.versionText}>Version 1.0.0</Text>
+                </TouchableOpacity>
+                {showDevSettings && (
                   <SettingItem
                     icon={<Code size={20} color="#00E6E6" />}
                     title="Developer Settings"
@@ -383,6 +371,138 @@ export default function SettingsScreen() {
           </ScrollView>
         </Animated.View>
       </SafeAreaView>
+
+      {/* Paywall Modal */}
+      <Modal
+        visible={showPaywallModal}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setShowPaywallModal(false)}
+      >
+        <PaywallScreen
+          onClose={() => setShowPaywallModal(false)}
+          onSubscribe={() => {
+            setShowPaywallModal(false);
+            showToast('Welcome to Ambitionly Pro! 🚀', 'success');
+          }}
+        />
+      </Modal>
+
+      {/* Subscription Details Modal */}
+      <Modal
+        visible={showSubscriptionDetailsModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowSubscriptionDetailsModal(false)}
+      >
+        <View style={styles.modalContainer}>
+          <LinearGradient colors={['#000000', '#1A1A1A']} style={styles.modalGradient}>
+            <SafeAreaView style={styles.modalSafeArea}>
+              {/* Header */}
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Subscription Details</Text>
+                <TouchableOpacity
+                  style={styles.modalCloseButton}
+                  onPress={() => setShowSubscriptionDetailsModal(false)}
+                >
+                  <X size={24} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+
+              {/* Subscription Info */}
+              <View style={styles.subscriptionDetailsContainer}>
+                <View style={styles.subscriptionCard}>
+                  <View style={styles.subscriptionHeader}>
+                    <Crown size={24} color="#FFD700" />
+                    <Text style={styles.subscriptionTitle}>{getSubscriptionDisplayText()}</Text>
+                  </View>
+                  
+                  <View style={styles.subscriptionInfo}>
+                    <View style={styles.infoRow}>
+                      <Calendar size={16} color="#9A9A9A" />
+                      <Text style={styles.infoLabel}>Status:</Text>
+                      <Text style={styles.infoValue}>Active</Text>
+                    </View>
+                    
+                    {subscriptionState.expiresAt && (
+                      <View style={styles.infoRow}>
+                        <Calendar size={16} color="#9A9A9A" />
+                        <Text style={styles.infoLabel}>Expires:</Text>
+                        <Text style={styles.infoValue}>
+                          {subscriptionState.expiresAt.toLocaleDateString()}
+                        </Text>
+                      </View>
+                    )}
+                    
+                    <View style={styles.infoRow}>
+                      <CreditCard size={16} color="#9A9A9A" />
+                      <Text style={styles.infoLabel}>Plan:</Text>
+                      <Text style={styles.infoValue}>
+                        {subscriptionState.plan === 'monthly' ? 'Monthly' : 
+                         subscriptionState.plan === 'annual' ? 'Annual' : 
+                         subscriptionState.plan === 'lifetime' ? 'Lifetime' : 'Unknown'}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Benefits */}
+                <View style={styles.benefitsContainer}>
+                  <Text style={styles.benefitsTitle}>Your Pro Benefits</Text>
+                  <View style={styles.benefitItem}>
+                    <Text style={styles.benefitText}>✓ Unlimited roadmap phases</Text>
+                  </View>
+                  <View style={styles.benefitItem}>
+                    <Text style={styles.benefitText}>✓ Advanced AI insights</Text>
+                  </View>
+                  <View style={styles.benefitItem}>
+                    <Text style={styles.benefitText}>✓ Priority support</Text>
+                  </View>
+                  <View style={styles.benefitItem}>
+                    <Text style={styles.benefitText}>✓ Export capabilities</Text>
+                  </View>
+                </View>
+
+                {/* Manage Subscription */}
+                <View style={styles.manageContainer}>
+                  <Text style={styles.manageTitle}>Manage Subscription</Text>
+                  <Text style={styles.manageDescription}>
+                    To cancel or modify your subscription, please go to your device's App Store settings.
+                  </Text>
+                  
+                  <TouchableOpacity
+                    style={styles.cancelButton}
+                    onPress={() => {
+                      setShowSubscriptionDetailsModal(false);
+                      Alert.alert(
+                        'Cancel Subscription',
+                        'Are you sure you want to cancel your subscription? You will lose access to Pro features.',
+                        [
+                          { text: 'Keep Subscription', style: 'cancel' },
+                          {
+                            text: 'Cancel Subscription',
+                            style: 'destructive',
+                            onPress: async () => {
+                              try {
+                                await cancelSubscription();
+                                showToast('Subscription cancelled', 'success');
+                              } catch {
+                                showToast('Failed to cancel subscription', 'error');
+                              }
+                            },
+                          },
+                        ]
+                      );
+                    }}
+                  >
+                    <Text style={styles.cancelButtonText}>Cancel Subscription</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </SafeAreaView>
+          </LinearGradient>
+        </View>
+      </Modal>
     </LinearGradient>
   );
 }
@@ -496,5 +616,141 @@ const styles = StyleSheet.create({
     color: '#666666',
     textAlign: 'center',
     fontStyle: 'italic',
+  },
+  // Modal styles
+  modalContainer: {
+    flex: 1,
+  },
+  modalGradient: {
+    flex: 1,
+  },
+  modalSafeArea: {
+    flex: 1,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2D2D2D',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  modalCloseButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#2D2D2D',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  subscriptionDetailsContainer: {
+    flex: 1,
+    padding: 20,
+  },
+  subscriptionCard: {
+    backgroundColor: '#1A1A1A',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#2D2D2D',
+  },
+  subscriptionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  subscriptionTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginLeft: 12,
+  },
+  subscriptionInfo: {
+    gap: 12,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  infoLabel: {
+    fontSize: 16,
+    color: '#9A9A9A',
+    minWidth: 80,
+  },
+  infoValue: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  benefitsContainer: {
+    backgroundColor: '#1A1A1A',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#2D2D2D',
+  },
+  benefitsTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginBottom: 16,
+  },
+  benefitItem: {
+    marginBottom: 8,
+  },
+  benefitText: {
+    fontSize: 16,
+    color: '#00E6E6',
+  },
+  manageContainer: {
+    backgroundColor: '#1A1A1A',
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#2D2D2D',
+  },
+  manageTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginBottom: 8,
+  },
+  manageDescription: {
+    fontSize: 14,
+    color: '#9A9A9A',
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  cancelButton: {
+    backgroundColor: '#FF4444',
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  versionTapArea: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  versionText: {
+    fontSize: 14,
+    color: '#9A9A9A',
+    fontWeight: '500',
   },
 });

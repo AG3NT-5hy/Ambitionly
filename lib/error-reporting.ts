@@ -1,23 +1,16 @@
 import Constants from 'expo-constants';
 
-let sentry:
-  | undefined
-  | {
-      init: (opts: unknown) => void;
-      Native: { captureException: (e: unknown, ctx?: unknown) => void };
-    };
+// Try to import sentry-expo statically to avoid Metro path resolution issues
+let sentry: any = undefined;
+try {
+  sentry = require('sentry-expo');
+} catch (error) {
+  console.warn('Sentry not available:', error);
+  sentry = undefined;
+}
 
 async function loadSentry() {
-  if (sentry) return sentry;
-  try {
-    const mod = await import('sentry-expo');
-    sentry = mod as any;
-    return sentry;
-  } catch (error) {
-    console.warn('Sentry not available:', error);
-    sentry = undefined;
-    return undefined;
-  }
+  return sentry;
 }
 
 export async function initSentry() {

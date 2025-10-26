@@ -1,6 +1,6 @@
 import createContextHook from '@nkzw/create-context-hook';
 import React, { useCallback, useMemo, useState } from 'react';
-import Toast from '@/components/Toast';
+import Toast from '../components/Toast'
 
 export type ToastType = 'info' | 'success' | 'error' | 'warning';
 

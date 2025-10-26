@@ -50,11 +50,8 @@ export default function WelcomeScreen() {
   const floatAnim2 = useRef(new Animated.Value(0)).current;
   const floatAnim3 = useRef(new Animated.Value(0)).current;
   
-  // Background flow animations
-  const backgroundFlow1 = useRef(new Animated.Value(0)).current;
-  const backgroundFlow2 = useRef(new Animated.Value(0)).current;
-  const backgroundFlow3 = useRef(new Animated.Value(0)).current;
-  const colorShift = useRef(new Animated.Value(0)).current;
+  // Background flow animations - single smooth linear flow
+  const backgroundFlow = useRef(new Animated.Value(0)).current;
   
   const timeouts = useRef<NodeJS.Timeout[]>([]).current;
   
@@ -100,10 +97,10 @@ export default function WelcomeScreen() {
     star.initialY = newY;
     star.angle = newAngle;
     
-    // Reset trail segments with proper spacing for contrail effect
+    // Reset trail segments to follow the star closely
     star.trail.forEach((segment, index) => {
-      segment.x.setValue(-100 - (index * 6));
-      segment.y.setValue(newY - (Math.tan((newAngle * Math.PI) / 180) * index * 6));
+      segment.x.setValue(-100 - (index * 3)); // Closer spacing
+      segment.y.setValue(newY - (Math.tan((newAngle * Math.PI) / 180) * index * 3));
       segment.opacity.setValue(0);
     });
     
@@ -134,11 +131,11 @@ export default function WelcomeScreen() {
       ]),
     ]);
     
-    // Animate trail segments with staggered delays for realistic contrail
+    // Animate trail segments to follow the star closely
     const trailAnimations = star.trail.map((segment, index) => {
-      const delay = index * 60; // Slightly more delay for natural trail formation
+      const delay = index * 30; // Reduced delay for tighter trail
       const segmentDuration = duration - delay;
-      const segmentDistance = distance + (index * 6);
+      const segmentDistance = distance + (index * 3); // Closer to star
       const segmentVerticalDistance = Math.tan((newAngle * Math.PI) / 180) * segmentDistance;
       
       return Animated.parallel([
@@ -156,15 +153,15 @@ export default function WelcomeScreen() {
         }),
         Animated.sequence([
           Animated.timing(segment.opacity, {
-            toValue: Math.max(0.05, 0.9 - (index * 0.045)), // Stronger initial opacity for contrail
-            duration: 150,
+            toValue: Math.max(0.1, 0.8 - (index * 0.04)), // More consistent opacity
+            duration: 100,
             delay,
             useNativeDriver: true,
           }),
           Animated.timing(segment.opacity, {
             toValue: 0,
-            duration: segmentDuration - 300,
-            delay: 150,
+            duration: segmentDuration - 200,
+            delay: 100,
             useNativeDriver: true,
           }),
         ]),
@@ -307,32 +304,29 @@ export default function WelcomeScreen() {
     createFloatingAnimation(floatAnim2, 4000, 1000);
     createFloatingAnimation(floatAnim3, 3500, 2000);
 
-    // Background flow animations - optimized for Android
-    const createBackgroundFlow = (animValue: Animated.Value, duration: number, delay: number = 0) => {
+    // Single smooth linear gradient flow animation
+    const createBackgroundFlow = () => {
       const animate = () => {
         Animated.loop(
           Animated.sequence([
-            Animated.timing(animValue, {
+            Animated.timing(backgroundFlow, {
               toValue: 1,
-              duration: Platform.OS === 'android' ? duration * 1.5 : duration, // Slower on Android
-              useNativeDriver: true, // Use native driver for better performance
-              // Smoother easing for Android
-            }),
-            Animated.timing(animValue, {
-              toValue: 0,
-              duration: Platform.OS === 'android' ? duration * 1.5 : duration,
+              duration: Platform.OS === 'android' ? 8000 : 10000,
               useNativeDriver: true,
-              // Smoother easing for Android
+            }),
+            Animated.timing(backgroundFlow, {
+              toValue: 0,
+              duration: Platform.OS === 'android' ? 8000 : 10000,
+              useNativeDriver: true,
             }),
           ])
         ).start();
       };
 
-      setTimeout(() => animate(), delay);
+      animate();
     };
 
-    createBackgroundFlow(backgroundFlow1, Platform.OS === 'android' ? 6000 : 8000, 0);
-    createBackgroundFlow(backgroundFlow2, Platform.OS === 'android' ? 8000 : 10000, 2000);
+    createBackgroundFlow();
 
     shootingStars.forEach((star, index) => {
       const timeout = setTimeout(() => animateShootingStar(star), index * 400 + Math.random() * 500) as unknown as NodeJS.Timeout; // More frequent staggered start
@@ -362,10 +356,7 @@ export default function WelcomeScreen() {
     floatAnim1,
     floatAnim2,
     floatAnim3,
-    backgroundFlow1,
-    backgroundFlow2,
-    backgroundFlow3,
-    colorShift
+    backgroundFlow
   ]);
 
   if (!fontsLoaded && !fontError) {
@@ -398,26 +389,20 @@ export default function WelcomeScreen() {
         style={StyleSheet.absoluteFillObject}
       />
       
-      {/* Optimized flowing overlays for Android */}
+      {/* Single smooth linear gradient flow */}
       <Animated.View
         style={[
           StyleSheet.absoluteFillObject,
           {
-            opacity: backgroundFlow1.interpolate({
+            opacity: backgroundFlow.interpolate({
               inputRange: [0, 0.5, 1],
-              outputRange: Platform.select({
-                android: [0.05, 0.15, 0.05], // Reduced opacity on Android
-                default: [0.1, 0.3, 0.1],
-              }),
+              outputRange: [0.1, 0.3, 0.1],
             }),
             transform: [
               {
-                translateY: backgroundFlow1.interpolate({
+                translateY: backgroundFlow.interpolate({
                   inputRange: [0, 1],
-                  outputRange: Platform.select({
-                    android: [-height * 0.1, height * 0.1], // Reduced movement on Android
-                    default: [-height * 0.2, height * 0.2],
-                  }),
+                  outputRange: [-height * 0.3, height * 0.3],
                 }),
               },
             ],
@@ -425,48 +410,9 @@ export default function WelcomeScreen() {
         ]}
       >
         <LinearGradient
-          colors={Platform.select({
-            android: ['rgba(139, 92, 246, 0)', 'rgba(139, 92, 246, 0.3)', 'rgba(139, 92, 246, 0)'], // More transparent on Android
-            default: ['transparent', '#8B5CF6', 'transparent'],
-          })}
+          colors={['transparent', '#8B5CF6', 'transparent']}
           start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={StyleSheet.absoluteFillObject}
-        />
-      </Animated.View>
-      
-      <Animated.View
-        style={[
-          StyleSheet.absoluteFillObject,
-          {
-            opacity: backgroundFlow2.interpolate({
-              inputRange: [0, 0.5, 1],
-              outputRange: Platform.select({
-                android: [0.02, 0.1, 0.02], // Much more subtle on Android
-                default: [0.05, 0.2, 0.05],
-              }),
-            }),
-            transform: [
-              {
-                translateX: backgroundFlow2.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: Platform.select({
-                    android: [-width * 0.05, width * 0.05], // Reduced movement on Android
-                    default: [-width * 0.1, width * 0.1],
-                  }),
-                }),
-              },
-            ],
-          },
-        ]}
-      >
-        <LinearGradient
-          colors={Platform.select({
-            android: ['rgba(41, 32, 43, 0)', 'rgba(41, 32, 43, 0.2)', 'rgba(41, 32, 43, 0)'], // More transparent on Android
-            default: ['transparent', '#29202B', 'transparent'],
-          })}
-          start={{ x: 0.5, y: 0 }}
-          end={{ x: 0.5, y: 1 }}
+          end={{ x: 0, y: 1 }}
           style={StyleSheet.absoluteFillObject}
         />
       </Animated.View>
@@ -499,8 +445,8 @@ export default function WelcomeScreen() {
                 style={[
                   styles.trailGradient,
                   {
-                    width: Math.max(3, 45 - (index * 2.2)), // Thinner and shorter trail segments
-                    height: Math.max(0.3, 1.2 - (index * 0.06)), // Much thinner height
+                    width: Math.max(2, 30 - (index * 1.5)), // Shorter trail segments
+                    height: Math.max(0.5, 1.5 - (index * 0.05)), // Slightly thicker for better visibility
                   }
                 ]}
               />

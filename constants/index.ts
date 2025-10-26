@@ -6,6 +6,16 @@ export const APP_CONFIG = {
   GC_TIME: 10 * 60 * 1000, // 10 minutes
 } as const;
 
+// RevenueCat Configuration
+// Note: API keys are configured in app/_layout.tsx
+// Android: Configured with Google Play key (goog_ADevXcaXkfzYBrgyWGbCXcRsqzh)
+// iOS: Not yet configured (placeholder key in place)
+export const REVENUECAT_CONFIG = {
+  ANDROID_CONFIGURED: true,
+  IOS_CONFIGURED: false,
+  REQUIRES_DEV_BUILD: true, // RevenueCat doesn't work in Expo Go
+} as const;
+
 // Storage Keys
 export const STORAGE_KEYS = {
   GOAL: 'ambitionly_goal',
@@ -71,3 +81,23 @@ export const DEV_CONFIG = {
   SHOW_PERFORMANCE_MONITOR: __DEV__,
   ENABLE_FLIPPER: __DEV__,
 } as const;
+
+// Connection Status Helper
+export async function checkConnections() {
+  const status = {
+    supabase: false,
+    database: false,
+    license: false,
+  };
+  
+  try {
+    // Check Supabase
+    const { supabase } = await import('../lib/supabase');
+    const { error } = await supabase.auth.getSession();
+    status.supabase = !error;
+  } catch (e) {
+    console.error('Supabase check failed:', e);
+  }
+  
+  return status;
+}

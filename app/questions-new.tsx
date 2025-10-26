@@ -4,7 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChevronRight, Target } from 'lucide-react-native';
-import { useAmbition } from '@/hooks/ambition-store';
+import { useAmbition } from '../hooks/ambition-store'
 
 const questions = [
   {
@@ -185,6 +185,9 @@ export default function QuestionsScreen() {
                 textAlignVertical="top"
                 returnKeyType="done"
                 blurOnSubmit={true}
+                accessibilityLabel={`Answer for: ${currentQuestion.title}`}
+                accessibilityHint="Enter your answer to this question"
+                maxLength={1000}
                 {...Platform.select({
                   android: {
                     underlineColorAndroid: 'transparent',
@@ -204,6 +207,9 @@ export default function QuestionsScreen() {
               ]}
               onPress={handleNext}
               disabled={!canProceed()}
+              accessibilityLabel={currentQuestionIndex === questions.length - 1 ? 'Generate Roadmap' : 'Next Question'}
+              accessibilityHint={currentQuestionIndex === questions.length - 1 ? 'Generate your personalized roadmap' : 'Go to next question'}
+              accessibilityRole="button"
             >
               <LinearGradient
                 colors={canProceed() ? ['#29202b', '#8B5CF6', '#A855F7'] : ['#333333', '#333333']}

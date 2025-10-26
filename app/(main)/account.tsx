@@ -3,9 +3,9 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert,
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { User, Mail, LogOut, Save, Camera, AtSign, ArrowLeft } from 'lucide-react-native';
-import { useUser } from '@/hooks/user-store';
+import { useUser } from '../../hooks/user-store'
 import { router } from 'expo-router';
-import { useUi } from '@/providers/UiProvider';
+import { useUi } from '../../providers/UiProvider'
 import * as ImagePicker from 'expo-image-picker';
 
 export default function AccountScreen() {

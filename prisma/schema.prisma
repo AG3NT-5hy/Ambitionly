@@ -13,13 +13,23 @@ datasource db {
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
-  password  String   // Hashed password
+  password  String?  // Hashed password (optional for social login)
+  name      String?  // User's name
+  username  String?  // Optional username
+  profilePicture String? // Profile picture URL
+  
+  // Integration IDs
   deviceId  String?  // Optional device-based identification for migration
   supabaseId String? @unique // Supabase user ID for integration
+  revenueCatUserId String? @unique // RevenueCat user ID (usually email)
+  isGuest Boolean @default(false) // Track if user started as guest
+  
+  // Timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  lastSyncAt DateTime?
 
-  // User data
+  // User goal and roadmap data
   goal           String?
   timeline       String?
   timeCommitment String?
@@ -28,7 +38,13 @@ model User {
   completedTasks String? // JSON string
   streakData     String? // JSON string
   taskTimers     String? // JSON string
-  lastSyncAt     DateTime?
+  
+  // Subscription data (synced from RevenueCat)
+  subscriptionPlan String? @default("free") // free, monthly, annual, lifetime
+  subscriptionStatus String? @default("inactive") // inactive, active, expired, cancelled
+  subscriptionExpiresAt DateTime?
+  subscriptionPurchasedAt DateTime?
+  revenueCatCustomerInfo String? // JSON string of latest customer info
 
   @@map("users")
 }

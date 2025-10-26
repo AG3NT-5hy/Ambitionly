@@ -1,0 +1,28 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "server.ts",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/trpc/(.*)",
+      "dest": "/server.ts"
+    },
+    {
+      "src": "/emails/(.*)",
+      "dest": "/server.ts"
+    },
+    {
+      "src": "/",
+      "dest": "/server.ts"
+    }
+  ],
+  "env": {
+    "DATABASE_URL": "@database_url",
+    "NODE_ENV": "production"
+  }
+}
+

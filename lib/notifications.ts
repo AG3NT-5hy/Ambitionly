@@ -169,9 +169,16 @@ export class NotificationService {
   }
 }
 
-// Initialize on import for mobile platforms
+// Initialize on import for mobile platforms (with better error handling)
 if (Platform.OS !== 'web') {
-  NotificationService.initialize();
+  // Only initialize if not in Expo Go to prevent errors
+  if (!isExpoGo) {
+    NotificationService.initialize().catch(error => {
+      console.warn('[Notifications] Initialization failed:', error);
+    });
+  } else {
+    console.log('[Notifications] Skipping initialization in Expo Go');
+  }
 } else {
   // For web, request permission when user interacts
   NotificationService.requestWebNotificationPermission();

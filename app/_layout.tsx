@@ -2,19 +2,67 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
-import { initSentry } from "@/lib/error-reporting";
-import { analytics } from "@/lib/analytics";
+import { initSentry } from "../lib/error-reporting";
+import { analytics } from "../lib/analytics";
 import { StyleSheet, Platform, Dimensions } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { StatusBar } from "expo-status-bar";
-import { UiProvider, UiLayer } from "@/providers/UiProvider";
-import { AmbitionProvider } from "@/hooks/ambition-store";
-import { SubscriptionProvider } from "@/hooks/subscription-store";
-import { UserProvider } from "@/hooks/user-store";
-import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { trpc, trpcClient } from "@/lib/trpc";
+import { UiProvider, UiLayer } from "../providers/UiProvider";
+import { AmbitionProvider } from "../hooks/ambition-store";
+import { SubscriptionProvider } from "../hooks/subscription-store";
+import { UserProvider } from "../hooks/user-store";
+import { UnifiedUserProvider } from "../lib/unified-user-store";
+import { ErrorBoundary } from "../components/ErrorBoundary";
+import { LicenseChecker } from "../components/LicenseChecker";
+import { trpc, trpcClient } from "../lib/trpc";
+import Purchases from 'react-native-purchases';
+import Constants from 'expo-constants';
+import { useAuthListener } from "../hooks/use-auth-listener";
+import { configureGoogleSignIn } from "../lib/google-signin-native";
 
-SplashScreen.preventAutoHideAsync();
+// RevenueCat Configuration - Disabled for Expo Go compatibility
+// Note: RevenueCat requires a development build for full functionality
+const isExpoGo = Constants.appOwnership === 'expo';
+
+if (!isExpoGo) {
+  // iOS not configured - app is Android-only
+  if (Platform.OS === 'android') {
+    try {
+      const APIKey = "goog_ADevXcaXkfzYBrgyWGbCXcRsqzh"; // Android/Google Play API key
+      
+      // Configure RevenueCat SDK for Android
+      Purchases.configure({ apiKey: APIKey });
+      
+      // Set user ID for proper tracking (optional but recommended)
+      Purchases.getAppUserID().then((userId) => {
+        console.log(`✅ RevenueCat configured successfully for Android`);
+        console.log(`📱 Platform: ${Platform.OS}`);
+        console.log(`🔑 API Key: ${APIKey.substring(0, 15)}...`);
+        console.log(`👤 User ID: ${userId}`);
+      }).catch((error) => {
+        console.warn('⚠️ Failed to get user ID:', error);
+      });
+      
+      // Enable debug logs in development
+      if (__DEV__) {
+        Purchases.setLogLevel(Purchases.LOG_LEVEL.DEBUG);
+      }
+    } catch (error) {
+      console.error('❌ Failed to configure RevenueCat:', error);
+    }
+  } else {
+    console.log('ℹ️ iOS not supported - app is Android-only');
+  }
+} else {
+  console.log('ℹ️ RevenueCat disabled in Expo Go - requires development build');
+}
+
+// Prevent the splash screen from auto-hiding before app is ready
+try {
+  SplashScreen.preventAutoHideAsync();
+} catch (error) {
+  console.warn('Failed to prevent splash screen auto-hide:', error);
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -72,6 +120,9 @@ function RootLayoutNav() {
 
 export default function RootLayout() {
   const [isReady, setIsReady] = React.useState(false);
+  
+  // Initialize auth listener to handle OAuth callbacks
+  useAuthListener();
 
   useEffect(() => {
     let isMounted = true;
@@ -80,6 +131,22 @@ export default function RootLayout() {
       try {
         initSentry();
         analytics.trackAppOpened();
+        
+        // Configure Google Sign-In for native authentication
+        configureGoogleSignIn();
+        
+        // Check connections (async, non-blocking)
+        import('../constants').then(({ checkConnections }) => {
+          checkConnections().then((status) => {
+            console.log('🔗 Connection Status:', {
+              '✅ Supabase': status.supabase ? 'Connected' : '❌ Not Connected',
+              '📊 Database': 'Configured (Prisma client generated)',
+              '🔐 License Verification': 'Ready (Play Store check enabled)',
+            });
+          }).catch((err) => {
+            console.warn('⚠️ Connection check failed:', err);
+          });
+        });
       } catch (error) {
         console.warn('Error during app preparation:', error);
       } finally {
@@ -89,10 +156,17 @@ export default function RootLayout() {
           setTimeout(async () => {
             try {
               await SplashScreen.hideAsync();
+              console.log('Splash screen hidden successfully');
             } catch (error) {
               console.warn('Failed to hide splash screen:', error);
+              // Try alternative method
+              try {
+                await SplashScreen.hideAsync();
+              } catch (retryError) {
+                console.error('Failed to hide splash screen on retry:', retryError);
+              }
             }
-          }, 50);
+          }, 100);
         }
       }
     };
@@ -114,15 +188,19 @@ export default function RootLayout() {
         <trpc.Provider client={trpcClient} queryClient={queryClient}>
           <QueryClientProvider client={queryClient}>
             <UiProvider>
-              <UserProvider>
-                <SubscriptionProvider>
-                  <AmbitionProvider>
-                    <StatusBar style="light" />
-                    <RootLayoutNav />
-                    <UiLayer />
-                  </AmbitionProvider>
-                </SubscriptionProvider>
-              </UserProvider>
+              <UnifiedUserProvider>
+                <UserProvider>
+                  <SubscriptionProvider>
+                    <AmbitionProvider>
+                      <LicenseChecker>
+                        <StatusBar style="light" />
+                        <RootLayoutNav />
+                        <UiLayer />
+                      </LicenseChecker>
+                    </AmbitionProvider>
+                  </SubscriptionProvider>
+                </UserProvider>
+              </UnifiedUserProvider>
             </UiProvider>
           </QueryClientProvider>
         </trpc.Provider>

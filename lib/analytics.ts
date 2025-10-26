@@ -10,6 +10,8 @@ export type AnalyticsEvent =
   | 'purchase_succeeded'
   | 'purchase_failed'
   | 'restore_purchases'
+  | 'restore_purchases_succeeded'
+  | 'restore_purchases_failed'
   | 'feature_used_goal_setting'
   | 'feature_used_roadmap_generation'
   | 'feature_used_task_timer'
@@ -166,8 +168,8 @@ class AnalyticsService {
     if (__DEV__) {
       this.provider = new ConsoleAnalyticsProvider();
     } else {
-      // In production, you would initialize with your actual provider
-      // For example: this.provider = new AmplitudeProvider('your-api-key');
+      // In production, use a no-op provider to avoid crashes
+      // Analytics can be added later with proper provider
       this.provider = new MockAnalyticsProvider();
     }
   }

@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Animated, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Animated, useWindowDimensions, Platform } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { X, Zap, Check, Sparkles, Target, TrendingUp, Users, Award, ArrowRight, AlertTriangle, Star, Flame, Shield, Trophy, Rocket, Clock, BarChart3, Eye, Heart } from 'lucide-react-native';
-import { useSubscription, type SubscriptionPlan } from '@/hooks/subscription-store';
-import { useUi } from '@/providers/UiProvider';
-import { analytics } from '@/lib/analytics';
+import { useSubscription, type SubscriptionPlan } from '../hooks/subscription-store';
+import { useUi } from '../providers/UiProvider';
+import { analytics } from '../lib/analytics';
+import Purchases from 'react-native-purchases';
 
 interface TrailSegment {
   x: Animated.Value;
@@ -32,10 +33,15 @@ interface PaywallScreenProps {
 
 export default function PaywallScreen({ onClose, onSubscribe }: PaywallScreenProps) {
   const { width, height } = useWindowDimensions();
-  const { purchaseSubscription, restoreSubscription, getAnnualSavings } = useSubscription();
+  const { purchaseSubscription, restoreSubscription, getAnnualSavings, syncRevenueCatStatus } = useSubscription();
   const { showToast } = useUi();
   const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan>('annual');
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [purchaseCompleted, setPurchaseCompleted] = useState<boolean>(false);
+  
+  // RevenueCat product fetching
+  const [packages, setPackages] = useState<any[]>([]);
+  const [isLoadingProducts, setIsLoadingProducts] = useState<boolean>(true);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
   
@@ -59,6 +65,7 @@ export default function PaywallScreen({ onClose, onSubscribe }: PaywallScreenPro
   // Background flow animations
   const backgroundFlow1 = useRef(new Animated.Value(0)).current;
   const backgroundFlow2 = useRef(new Animated.Value(0)).current;
+  const backgroundFlow3 = useRef(new Animated.Value(0)).current;
   
   // Progress bar animations
   const progressAnim1 = useRef(new Animated.Value(0)).current;
@@ -286,28 +293,36 @@ export default function PaywallScreen({ onClose, onSubscribe }: PaywallScreenPro
     createFloatingAnimation(floatAnim2, 4000, 1000);
     createFloatingAnimation(floatAnim3, 3500, 2000);
 
-    // Background flow animations
+    // Background flow animations - Android optimized
     const createBackgroundFlow = (animValue: Animated.Value, duration: number, delay: number = 0) => {
       const animate = () => {
-        Animated.sequence([
-          Animated.timing(animValue, {
-            toValue: 1,
-            duration: duration,
-            useNativeDriver: false,
-          }),
-          Animated.timing(animValue, {
-            toValue: 0,
-            duration: duration,
-            useNativeDriver: false,
-          }),
-        ]).start(() => animate());
+        Animated.loop(
+          Animated.sequence([
+            Animated.timing(animValue, {
+              toValue: 1,
+              duration: duration,
+              useNativeDriver: true, // Use native driver for better Android performance
+            }),
+            Animated.timing(animValue, {
+              toValue: 0,
+              duration: duration,
+              useNativeDriver: true,
+            }),
+          ]),
+          { iterations: -1 } // Infinite loop
+        ).start();
       };
 
       setTimeout(() => animate(), delay);
     };
 
-    createBackgroundFlow(backgroundFlow1, 8000, 0);
-    createBackgroundFlow(backgroundFlow2, 10000, 2000);
+    // Platform-specific animation durations for better performance
+    const flowDuration1 = Platform.OS === 'android' ? 8000 : 6000; // Faster for more visible flow
+    const flowDuration2 = Platform.OS === 'android' ? 10000 : 8000;
+    
+    createBackgroundFlow(backgroundFlow1, flowDuration1, 0);
+    createBackgroundFlow(backgroundFlow2, flowDuration2, 2000); // Reduced delay for better overlap
+    createBackgroundFlow(backgroundFlow3, flowDuration1 + 2000, 4000); // Third layer for more complexity
     
     // Progress bar animations
     const animateProgress = (animValue: Animated.Value, delay: number, targetValue: number) => {
@@ -378,6 +393,7 @@ export default function PaywallScreen({ onClose, onSubscribe }: PaywallScreenPro
     floatAnim3,
     backgroundFlow1,
     backgroundFlow2,
+    backgroundFlow3,
     progressAnim1,
     progressAnim2,
     progressAnim3,
@@ -389,18 +405,112 @@ export default function PaywallScreen({ onClose, onSubscribe }: PaywallScreenPro
     timeouts
   ]);
 
+  // RevenueCat product fetching
+  useEffect(() => {
+    const getPackages = async () => {
+      try {
+        setIsLoadingProducts(true);
+        
+        // Try to use RevenueCat SDK if available
+        try {
+          const offerings = await Purchases.getOfferings();
+          if (offerings.current && offerings.current.availablePackages.length > 0) {
+            setPackages(offerings.current.availablePackages);
+            setIsLoadingProducts(false);
+            return;
+          }
+        } catch (e) {
+          console.log("RevenueCat SDK not available, using fallback:", e);
+        }
+        
+        // Fallback: Use mock packages when RevenueCat is not available
+        const mockPackages = [
+          {
+            identifier: 'annual',
+            packageType: 'ANNUAL',
+            product: {
+              identifier: 'ambitionly_annual',
+              title: 'Annual Plan',
+              description: 'Save 28% • Only $10/month',
+              priceString: '$120.90/year',
+            }
+          },
+          {
+            identifier: 'monthly',
+            packageType: 'MONTHLY',
+            product: {
+              identifier: 'ambitionly_monthly',
+              title: 'Monthly Plan',
+              description: 'Cancel anytime',
+              priceString: '$12.09/month',
+            }
+          },
+          {
+            identifier: 'lifetime',
+            packageType: 'LIFETIME',
+            product: {
+              identifier: 'ambitionly_lifetime',
+              title: 'Lifetime Access',
+              description: 'Save 10% • Pay once, own forever',
+              priceString: '$220 once',
+            }
+          }
+        ];
+        
+        setPackages(mockPackages);
+      } catch (e) {
+        console.log("Error fetching offerings", e);
+        // Don't show error toast for fallback scenario
+        if (e instanceof Error && !e.message.includes('RevenueCat')) {
+          showToast('Failed to load subscription options', 'error');
+        }
+      } finally {
+        setIsLoadingProducts(false);
+      }
+    };
+    getPackages();
+  }, []);
+
   const handlePurchase = async () => {
-    if (isLoading) return;
+    if (isLoading || !selectedPlan) return;
     
     setIsLoading(true);
     analytics.track('purchase_started', { plan: selectedPlan });
 
     try {
+      // Check if RevenueCat is properly configured
+      let isRevenueCatConfigured = false;
+      try {
+        isRevenueCatConfigured = await Purchases.isConfigured();
+      } catch (e) {
+        console.log("RevenueCat not configured, using fallback:", e);
+        isRevenueCatConfigured = false;
+      }
+      
+      if (isRevenueCatConfigured && packages.length > 0) {
+        // Use RevenueCat if available
+        const selectedPackage = packages.find(pkg => {
+          const planType = convertToSubscriptionPlan(pkg.packageType);
+          return planType === selectedPlan;
+        });
+        
+        if (selectedPackage) {
+          console.log(`[Purchase] Using RevenueCat package for plan ${selectedPlan}`);
+          await handleRevenueCatPurchase(selectedPackage);
+          return;
+        } else {
+          console.log(`[Purchase] No RevenueCat package found for plan ${selectedPlan}, using fallback`);
+        }
+      }
+      
+      // Fallback to mock purchase system
       const success = await purchaseSubscription(selectedPlan);
       
       if (success) {
         showToast('Welcome to Ambitionly Pro! 🎉', 'success');
-        onSubscribe();
+        setPurchaseCompleted(true);
+        // Don't automatically call onSubscribe - let user click "Start Your Journey"
+        // onSubscribe(); // Commented out to prevent automatic activation
       } else {
         showToast('Purchase failed. Please try again.', 'error');
         analytics.track('purchase_failed', { plan: selectedPlan, error: 'Purchase returned false' });
@@ -414,17 +524,119 @@ export default function PaywallScreen({ onClose, onSubscribe }: PaywallScreenPro
     }
   };
 
+  // RevenueCat purchase handling
+  const handleRevenueCatPurchase = async (pkg: any) => {
+    if (isLoading) return;
+    
+    setIsLoading(true);
+    analytics.track('purchase_started', { productId: pkg.identifier });
+
+    try {
+      // Try RevenueCat SDK first
+      try {
+        const { customerInfo } = await Purchases.purchasePackage(pkg);
+        if (customerInfo.entitlements.active.premium_access) {
+          // Sync subscription state with RevenueCat
+          await syncRevenueCatStatus();
+          
+          showToast('✅ Premium unlocked!', 'success');
+          setPurchaseCompleted(true);
+          analytics.track('purchase_succeeded', { productId: pkg.identifier });
+          // Don't automatically call onSubscribe - let user click "Start Your Journey"
+          // onSubscribe(); // Commented out to prevent automatic activation
+        } else {
+          showToast('Purchase completed but premium not activated', 'warning');
+        }
+        return;
+      } catch (e) {
+        console.log("RevenueCat purchase failed, using fallback:", e);
+      }
+      
+      // Fallback: Use the regular purchase handler
+      const planType = convertToSubscriptionPlan(pkg.packageType);
+      const success = await purchaseSubscription(planType);
+      
+      if (success) {
+        showToast('✅ Premium unlocked!', 'success');
+        setPurchaseCompleted(true);
+        // Don't automatically call onSubscribe - let user click "Start Your Journey"
+        // onSubscribe(); // Commented out to prevent automatic activation
+      } else {
+        showToast('Purchase failed. Please try again.', 'error');
+        analytics.track('purchase_failed', { productId: pkg.identifier, error: 'Purchase returned false' });
+      }
+    } catch (e) {
+      if (!(e as any)?.userCancelled) {
+        console.log("Purchase error", e);
+        showToast('Purchase failed. Please try again.', 'error');
+        analytics.track('purchase_failed', { productId: pkg.identifier, error: (e as Error).message });
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleStartJourney = () => {
+    if (purchaseCompleted) {
+      onSubscribe();
+    }
+  };
+
+  // Helper function to convert RevenueCat package type to SubscriptionPlan
+  const convertToSubscriptionPlan = (packageType: any): SubscriptionPlan => {
+    if (!packageType) return 'annual'; // Default fallback
+    
+    const type = packageType.toString().toLowerCase();
+    
+    switch (type) {
+      case 'monthly':
+      case 'month':
+        return 'monthly';
+      case 'annual':
+      case 'year':
+      case 'yearly':
+        return 'annual';
+      case 'lifetime':
+      case 'forever':
+        return 'lifetime';
+      default:
+        console.warn('Unknown package type:', packageType, 'defaulting to annual');
+        return 'annual';
+    }
+  };
+
   const handleRestore = async () => {
     if (isLoading) return;
     
     setIsLoading(true);
     
     try {
+      // Try RevenueCat restore first
+      try {
+        const customerInfo = await Purchases.restorePurchases();
+        if (customerInfo.entitlements.active.premium_access) {
+          // Sync subscription state with RevenueCat
+          await syncRevenueCatStatus();
+          
+          showToast('Subscription restored successfully! 🎉', 'success');
+          setPurchaseCompleted(true);
+          analytics.track('restore_purchases_succeeded');
+          // Don't automatically call onSubscribe - let user click "Start Your Journey"
+          // onSubscribe(); // Commented out to prevent automatic activation
+          return;
+        }
+      } catch (e) {
+        console.log("RevenueCat restore failed, using fallback:", e);
+      }
+      
+      // Fallback: Use the regular restore handler
       const restored = await restoreSubscription();
       
       if (restored) {
         showToast('Subscription restored successfully! 🎉', 'success');
-        onSubscribe();
+        setPurchaseCompleted(true);
+        // Don't automatically call onSubscribe - let user click "Start Your Journey"
+        // onSubscribe(); // Commented out to prevent automatic activation
       } else {
         showToast('No previous purchases found.', 'warning');
       }
@@ -477,22 +689,34 @@ export default function PaywallScreen({ onClose, onSubscribe }: PaywallScreenPro
     },
   ];
 
-  const PlanCard = ({ plan, title, price, subtitle, isPopular = false }: {
+  const PlanCard = ({ plan, title, price, subtitle, isPopular = false, onPress }: {
     plan: SubscriptionPlan;
     title: string;
     price: string;
     subtitle?: string;
     isPopular?: boolean;
-  }) => (
-    <TouchableOpacity
-      style={[
-        styles.planCard,
-        selectedPlan === plan && styles.selectedPlanCard,
-        isPopular && styles.popularPlanCard,
-      ]}
-      onPress={() => setSelectedPlan(plan)}
-      accessibilityLabel={`Select ${title} plan`}
-    >
+    onPress?: () => void;
+  }) => {
+    const handlePlanSelect = () => {
+      try {
+        console.log('Plan selected:', plan);
+        setSelectedPlan(plan);
+      } catch (error) {
+        console.error('Error selecting plan:', error);
+        showToast('Error selecting plan. Please try again.', 'error');
+      }
+    };
+
+    return (
+      <TouchableOpacity
+        style={[
+          styles.planCard,
+          selectedPlan === plan && styles.selectedPlanCard,
+          isPopular && styles.popularPlanCard,
+        ]}
+        onPress={onPress || handlePlanSelect}
+        accessibilityLabel={`Select ${title} plan`}
+      >
       {isPopular && (
         <View style={styles.popularBadge}>
           <Sparkles size={12} color="#FFFFFF" />
@@ -524,7 +748,8 @@ export default function PaywallScreen({ onClose, onSubscribe }: PaywallScreenPro
         )}
       </View>
     </TouchableOpacity>
-  );
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -534,7 +759,27 @@ export default function PaywallScreen({ onClose, onSubscribe }: PaywallScreenPro
         style={StyleSheet.absoluteFillObject}
       />
       
-      {/* Subtle flowing overlays */}
+      {/* Additional Android-optimized gradient overlay */}
+      <Animated.View
+        style={[
+          StyleSheet.absoluteFillObject,
+          {
+            opacity: backgroundFlow1.interpolate({
+              inputRange: [0, 0.5, 1],
+              outputRange: [0.02, 0.08, 0.02],
+            }),
+          },
+        ]}
+      >
+        <LinearGradient
+          colors={['#8B5CF6', 'transparent', '#7C3AED', 'transparent', '#8B5CF6']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={StyleSheet.absoluteFillObject}
+        />
+      </Animated.View>
+      
+      {/* Continuous linear gradient flow - Top to Bottom */}
       <Animated.View
         style={[
           StyleSheet.absoluteFillObject,
@@ -543,25 +788,38 @@ export default function PaywallScreen({ onClose, onSubscribe }: PaywallScreenPro
               inputRange: [0, 0.5, 1],
               outputRange: [0.1, 0.3, 0.1],
             }),
-            transform: [
-              {
-                translateY: backgroundFlow1.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [-height * 0.2, height * 0.2],
-                }),
-              },
-            ],
           },
         ]}
       >
-        <LinearGradient
-          colors={['transparent', '#8B5CF6', 'transparent']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={StyleSheet.absoluteFillObject}
-        />
+        <Animated.View
+          style={[
+            {
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: height * 2, // Make it twice the screen height for smooth flow
+              transform: [
+                {
+                  translateY: backgroundFlow1.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-height, 0], // Move from above screen to below
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          <LinearGradient
+            colors={['transparent', '#8B5CF6', '#7C3AED', '#8B5CF6', 'transparent']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 0, y: 1 }}
+            style={StyleSheet.absoluteFillObject}
+          />
+        </Animated.View>
       </Animated.View>
       
+      {/* Secondary gradient flow - Bottom to Top */}
       <Animated.View
         style={[
           StyleSheet.absoluteFillObject,
@@ -570,23 +828,75 @@ export default function PaywallScreen({ onClose, onSubscribe }: PaywallScreenPro
               inputRange: [0, 0.5, 1],
               outputRange: [0.05, 0.2, 0.05],
             }),
-            transform: [
-              {
-                translateX: backgroundFlow2.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [-width * 0.1, width * 0.1],
-                }),
-              },
-            ],
           },
         ]}
       >
-        <LinearGradient
-          colors={['transparent', '#1A1A1A', 'transparent']}
-          start={{ x: 0.5, y: 0 }}
-          end={{ x: 0.5, y: 1 }}
-          style={StyleSheet.absoluteFillObject}
-        />
+        <Animated.View
+          style={[
+            {
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: height * 2, // Make it twice the screen height for smooth flow
+              transform: [
+                {
+                  translateY: backgroundFlow2.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0, -height], // Move from below screen to above
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          <LinearGradient
+            colors={['transparent', '#1A1A1A', '#2D2D2D', '#1A1A1A', 'transparent']}
+            start={{ x: 0, y: 1 }}
+            end={{ x: 0, y: 0 }}
+            style={StyleSheet.absoluteFillObject}
+          />
+        </Animated.View>
+      </Animated.View>
+      
+      {/* Third gradient flow - Diagonal flow */}
+      <Animated.View
+        style={[
+          StyleSheet.absoluteFillObject,
+          {
+            opacity: backgroundFlow3.interpolate({
+              inputRange: [0, 0.5, 1],
+              outputRange: [0.03, 0.12, 0.03],
+            }),
+          },
+        ]}
+      >
+        <Animated.View
+          style={[
+            {
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: height * 1.5,
+              transform: [
+                {
+                  translateY: backgroundFlow3.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-height * 0.5, height * 0.5],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          <LinearGradient
+            colors={['transparent', '#6B46C1', 'transparent']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={StyleSheet.absoluteFillObject}
+          />
+        </Animated.View>
       </Animated.View>
       
       {/* Shooting stars */}
@@ -962,46 +1272,60 @@ export default function PaywallScreen({ onClose, onSubscribe }: PaywallScreenPro
             >
               <Text style={styles.sectionTitle}>Choose Your Plan</Text>
               
-              <View style={styles.animatedPlanCard1}>
-                
-                <PlanCard
-                  plan="annual"
-                  title="Annual Plan"
-                  price="$120.90/year"
-                  subtitle="Save 28% • Only $10/month"
-                  isPopular={true}
-                />
-                
-                {/* Value indicators */}
-                <View style={styles.valueIndicators}>
-                  <View style={styles.valueIndicator}>
-                    <Clock size={12} color="#00E6E6" />
-                    <Text style={styles.valueText}>Best Value</Text>
-                  </View>
-                  <View style={styles.valueIndicator}>
-                    <Heart size={12} color="#FF6B35" />
-                    <Text style={styles.valueText}>Most Loved</Text>
-                  </View>
+              {isLoadingProducts ? (
+                <View style={styles.loadingContainer}>
+                  <Text style={styles.loadingText}>Loading subscription options...</Text>
                 </View>
-              </View>
-              
-              <View style={styles.animatedPlanCard2}>
-                <PlanCard
-                  plan="monthly"
-                  title="Monthly Plan"
-                  price="$12.09/month"
-                  subtitle="Cancel anytime"
-                />
-              </View>
-              
-              <View style={styles.animatedPlanCard3}>
-                <PlanCard
-                  plan="lifetime"
-                  title="Lifetime Access"
-                  price="$220 once"
-                  subtitle="Save 10% • Pay once, own forever"
-                />
-              </View>
+              ) : packages.length > 0 ? (
+                packages.map((pkg, index) => (
+                  <View key={pkg.identifier} style={styles[`animatedPlanCard${index + 1}` as keyof typeof styles] as any}>
+                    <PlanCard
+                      plan={convertToSubscriptionPlan(pkg.packageType)}
+                      title={pkg.product.title}
+                      price={pkg.product.priceString}
+                      subtitle={pkg.product.description || "Premium features included"}
+                      isPopular={index === 0}
+                    />
+                    
+                    {index === 0 && (
+                      <View style={styles.valueIndicators}>
+                        <View style={styles.valueIndicator}>
+                          <Clock size={12} color="#00E6E6" />
+                          <Text style={styles.valueText}>Best Value</Text>
+                        </View>
+                        <View style={styles.valueIndicator}>
+                          <Heart size={12} color="#FF6B35" />
+                          <Text style={styles.valueText}>Most Loved</Text>
+                        </View>
+                      </View>
+                    )}
+                  </View>
+                ))
+              ) : (
+                <View style={styles.fallbackContainer}>
+                  <PlanCard
+                    plan="annual"
+                    title="Annual Plan"
+                    price="$120.90/year"
+                    subtitle="Save 28% • Only $10/month"
+                    isPopular={true}
+                  />
+                  
+                  <PlanCard
+                    plan="monthly"
+                    title="Monthly Plan"
+                    price="$12.09/month"
+                    subtitle="Cancel anytime"
+                  />
+                  
+                  <PlanCard
+                    plan="lifetime"
+                    title="Lifetime Access"
+                    price="$220 once"
+                    subtitle="Save 10% • Pay once, own forever"
+                  />
+                </View>
+              )}
             </Animated.View>
 
             {/* CTA Section */}
@@ -1021,9 +1345,9 @@ export default function PaywallScreen({ onClose, onSubscribe }: PaywallScreenPro
                 
                 <TouchableOpacity
                   style={[styles.purchaseButton, isLoading && styles.disabledButton]}
-                  onPress={handlePurchase}
+                  onPress={purchaseCompleted ? handleStartJourney : handlePurchase}
                   disabled={isLoading}
-                  accessibilityLabel={`Purchase ${selectedPlan} plan`}
+                  accessibilityLabel={purchaseCompleted ? "Start Your Journey" : `Purchase ${selectedPlan} plan`}
                 >
                   <LinearGradient
                     colors={isLoading ? ['#666666', '#666666'] : ['#29202b', '#8B5CF6', '#7C3AED']}
@@ -1031,7 +1355,7 @@ export default function PaywallScreen({ onClose, onSubscribe }: PaywallScreenPro
                   >
                     <Zap size={20} color="#FFFFFF" />
                     <Text style={styles.purchaseButtonText}>
-                      Start your Journey
+                      {purchaseCompleted ? "Start Your Journey" : `Purchase ${selectedPlan} Plan`}
                     </Text>
                     
                     {/* Static arrow */}
@@ -1326,6 +1650,18 @@ const styles = StyleSheet.create({
   },
   footer: {
     paddingBottom: 24,
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#9A9A9A',
+    textAlign: 'center',
+  },
+  fallbackContainer: {
+    gap: 16,
   },
   footerText: {
     fontSize: 12,

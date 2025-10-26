@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { emailStorageService } from '@/lib/email-storage';
+import { emailStorageService } from '../../lib/email-storage'
 
 const emailsApi = new Hono();
 

@@ -6,12 +6,22 @@
       "@/*": [
         "./*"
       ]
-    }
+    },
+    "skipLibCheck": true,
+    "types": []
   },
   "include": [
     "**/*.ts",
     "**/*.tsx",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "android",
+    "ios",
+    "__tests__",
+    "jest.config.js",
+    "jest.setup.js"
   ]
 }

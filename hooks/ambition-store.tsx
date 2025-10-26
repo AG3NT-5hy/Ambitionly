@@ -72,6 +72,7 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
   const [taskTimers, setTaskTimersState] = useState<TaskTimer[]>([]);
   const previousTimerStates = useRef<Map<string, boolean>>(new Map());
   const notificationSentRef = useRef<Set<string>>(new Set());
+  const isGeneratingRoadmapRef = useRef(false);
 
   // Load data from storage on init
   useEffect(() => {
@@ -124,7 +125,17 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         if (storedRoadmap) {
           try {
             const parsed = JSON.parse(storedRoadmap);
-            setRoadmapState(parsed);
+            // Convert createdAt string back to Date object if it exists
+            if (parsed.createdAt && typeof parsed.createdAt === 'string') {
+              parsed.createdAt = new Date(parsed.createdAt);
+            }
+            // Validate that the roadmap has the expected structure
+            if (parsed && typeof parsed === 'object' && parsed.phases && Array.isArray(parsed.phases)) {
+              setRoadmapState(parsed);
+            } else {
+              console.warn('Invalid roadmap structure loaded from storage, setting to null');
+              setRoadmapState(null);
+            }
           } catch (error) {
             console.error('Failed to parse stored roadmap:', error);
             console.error('Stored roadmap value:', storedRoadmap?.substring(0, 100));
@@ -329,8 +340,15 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
   };
 
   const generateRoadmap = async () => {
+    // Prevent multiple simultaneous roadmap generations
+    if (isGeneratingRoadmapRef.current) {
+      console.log('[Roadmap] Already generating roadmap, skipping duplicate call');
+      return;
+    }
+    
     try {
-      console.log('Generating roadmap with AI...');
+      console.log('[Roadmap] Starting roadmap generation with AI...');
+      isGeneratingRoadmapRef.current = true;
       
       // Validate required data before making API call
       if (!goal || !timeline || !timeCommitment) {
@@ -338,10 +356,10 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
       }
       
       // Input sanitization
-      const sanitizedGoal = goal.trim().slice(0, 500); // Limit goal length
+      const sanitizedGoal = goal.trim().slice(0, 500);
       const sanitizedTimeline = timeline.trim();
       const sanitizedTimeCommitment = timeCommitment.trim();
-      const sanitizedAnswers = answers.map(answer => answer.trim().slice(0, 1000)); // Limit answer length
+      const sanitizedAnswers = answers.map(answer => answer.trim().slice(0, 1000));
       
       if (!sanitizedGoal || !sanitizedTimeline || !sanitizedTimeCommitment) {
         throw new Error('Invalid input data after sanitization');
@@ -351,26 +369,66 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         '3-4 phases (short, mid, long-term)',
         '2-3 milestones per phase',
         '3-5 tasks per milestone',
-        'Tasks must be concrete, observable, and context-based with immediate actionable steps',
-        'Each task begins with an action verb and includes a clear deliverable or outcome',
-        'Each task includes an estimatedTime like "5 min", "10 min", "25 min", "45 min", or "1.5 h"',
-        'CRITICAL: The very first task must be 5-10 minutes and immediately actionable (no research, no "identify" tasks)',
-        'First 3-5 tasks should be quick wins: "5 min", "8 min", "10 min", "12 min", "15 min" maximum',
-        'First tasks should be concrete actions like: create a document, send a message, book a meeting, complete a specific module',
-        'Gradually increase task duration as the user progresses through the roadmap',
-        'Avoid vague phrases like "identify resources", "learn skills", "research", "explore" in early tasks',
-        'Replace generic tasks with specific actions: instead of "research X" use "find 3 specific Y resources and bookmark them"',
-        'Prefer specific vendors, programs, or artifacts when possible (company LMS course names, specific templates, exact meeting types)',
-        'Bias all content to the given industry; name typical SOPs, certifications, checklists, meeting cadences, and tools for that industry',
-        'Make tasks progressively build on each other - each task should use outputs from previous tasks',
-        'Include specific deliverables: documents to create, people to contact, courses to complete, templates to fill out',
+        'Tasks must be concrete, actionable, and directly related to achieving the goal',
+        'Each task should build on previous tasks and create tangible progress',
+        'Tasks should be specific to the user\'s goal and context',
+        'Each task includes an estimatedTime - use realistic, achievable durations: "10 min", "15 min", "20 min", "30 min", "45 min", or "1 h" maximum',
+        'Most tasks should be 15-30 minutes - only use 45 min or 1 h for substantial learning or practice sessions',
+        'Avoid overestimating time - tasks should feel achievable and not overwhelming',
+        'Include a mix of learning, practicing, building, and demonstrating skills',
+        'Tasks should be measurable with clear completion criteria',
+        'Focus on real-world application and skill development',
       ].join('\n- ');
-
-      const examples = `Examples of GOOD first tasks (5-15 min):\n- Create a Google Doc titled "[Goal] Progress Tracker" with sections for phases, milestones, and weekly wins (8 min)\n- Send a Slack message to your manager requesting a 20-min goal alignment meeting this week (5 min)\n- Complete the onboarding quiz for [Specific Course Name] in the company LMS and screenshot your score (10 min)\n- Book a 30-min coffee chat with [Specific Senior Colleague] using Calendly link from their Slack profile (7 min)\n- Download and fill out the first page of the [Industry-Specific Template] from the shared drive (12 min)\n\nExamples of GOOD longer tasks (20+ min):\n- Complete the McDonald's Shift Management 101 course in the LMS (Module 1–3) — take notes on scheduling rules (45 min)\n- Shadow senior manager Jamie M. for one full lunch shift; capture 5 observations on queue management (3 h)\n- Draft the Q2 shift handover template in Google Docs using the Ops template v2; share with Alex for comments (60 min)\n\nExamples of BAD first tasks (too vague/long):\n- Research available resources (vague)\n- Learn about industry best practices (vague)\n- Identify potential mentors (vague)\n- Complete comprehensive training program (too long)`;
 
       const industry = inferIndustry(sanitizedGoal, sanitizedAnswers);
 
-      const prompt = `Create a production-ready, specific roadmap for this goal: "${sanitizedGoal}"\n\nTimeline: ${sanitizedTimeline}\nDaily time commitment: ${sanitizedTimeCommitment}\nIndustry: ${industry}\n\nAdditional user context:\n${sanitizedAnswers.map((answer, index) => `${index + 1}. ${answer}`).join('\n')}\n\nTime commitment analysis:\n- The user can dedicate ${sanitizedTimeCommitment} to this goal\n- Design tasks and milestones that fit within this daily time constraint\n- Consider cumulative progress over days/weeks based on this daily commitment\n- Ensure realistic pacing that accounts for daily availability\n\nIndustry guidance:\n- Ground tasks in ${industry}. If a company is mentioned (e.g., McDonald's), reference realistic internal artifacts (LMS courses, SOP names, checklists) when reasonable.\n- Prefer concrete tools used in this industry (e.g., QSR: shift logs, food safety checklists; Retail: planograms, POS audits; Software: Jira tickets, PRs).\n\nCRITICAL FIRST TASK REQUIREMENTS:\n- The very first task MUST be 5-10 minutes and immediately actionable\n- NO research, identification, or exploration tasks as the first task\n- First task should create something concrete (document, message, booking) or complete something specific (quiz, form, download)\n- First task should set up infrastructure for the goal (tracking doc, calendar invite, course enrollment)\n\nTask progression strategy:\n- Tasks 1-3: Quick setup and momentum builders (5-15 min each)\n- Tasks 4-8: Foundation building with specific deliverables (15-45 min each)\n- Later tasks: Deeper work and skill building (45 min - 2 hours)\n\nStrict requirements:\n- ${constraints}\n\n${examples}\n\nOutput ONLY valid JSON matching exactly this schema (no extra text):\n{\n  "phases": [\n    {\n      "title": "string",\n      "description": "string",\n      "milestones": [\n        {\n          "title": "string",\n          "description": "string",\n          "tasks": [\n            {\n              "title": "string",\n              "description": "string",\n              "estimatedTime": "string"\n            }\n          ]\n        }\n      ]\n    }\n  ]\n}`;
+      const prompt = `Create a personalized, actionable roadmap to achieve this goal: "${sanitizedGoal}"
+
+Timeline: ${sanitizedTimeline}
+Daily time commitment: ${sanitizedTimeCommitment}
+Industry context: ${industry}
+
+User background and context:
+${sanitizedAnswers.map((answer, index) => `${index + 1}. ${answer}`).join('\n')}
+
+Create a comprehensive roadmap that:
+- Breaks down the goal into logical phases (foundation → skill building → execution → mastery)
+- Each phase contains 2-3 milestones that represent significant progress points
+- Each milestone contains 3-5 specific, actionable tasks
+- Tasks should be directly related to achieving "${sanitizedGoal}"
+- Consider the user's ${sanitizedTimeCommitment} daily commitment when sizing tasks
+- Keep time estimates realistic and achievable - most tasks should be 15-30 minutes
+- Only use 45 min or 1 h for substantial learning modules or practice sessions
+- Build progressively from foundational skills to advanced application
+- Include both learning and practical application tasks
+- Make tasks specific enough that the user knows exactly what to do
+- Ensure tasks build on each other logically
+
+Requirements:
+- ${constraints}
+
+Output ONLY valid JSON in this exact format:
+{
+  "phases": [
+    {
+      "title": "string",
+      "description": "string",
+      "milestones": [
+        {
+          "title": "string",
+          "description": "string",
+          "tasks": [
+            {
+              "title": "string",
+              "description": "string",
+              "estimatedTime": "string"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}`;
 
       // Add timeout and retry logic with rate limiting
       const req = await httpRequest<{ completion: string }>('https://toolkit.rork.com/text/llm/', {
@@ -378,7 +436,7 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: [
-            { role: 'system', content: 'You are an elite execution coach. Produce concrete, measurable, company-context tasks with action verbs, artifacts, and durations. Consider the user\'s daily time commitment when designing tasks and pacing. No generic advice. Output valid JSON only.' },
+            { role: 'system', content: 'You are an expert career and skill development coach. Create comprehensive, actionable roadmaps that break down ambitious goals into achievable steps. Focus on practical, real-world tasks that build skills progressively. Each task should be specific, measurable, and directly contribute to achieving the stated goal. Output valid JSON only.' },
             { role: 'user', content: prompt },
           ],
         }),
@@ -391,32 +449,38 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         throw req.error ?? new Error('Failed request');
       }
 
-      const data = req.data as { completion: string };
+      const data = req.data as { completion: string | object };
       let roadmapData;
 
       try {
-        // Try to parse the AI response as JSON
-        let cleanedResponse: string = String(data.completion ?? '');
+        // Check if completion is already an object
+        if (typeof data.completion === 'object' && data.completion !== null) {
+          console.log('AI response is already an object, using directly');
+          roadmapData = data.completion;
+        } else {
+          // Try to parse the AI response as JSON string
+          let cleanedResponse: string = String(data.completion ?? '');
 
-        // Normalize smart quotes and stray characters
-        cleanedResponse = cleanedResponse
-          .replace(/[“”]/g, '"')
-          .replace(/[‘’]/g, "'")
-          .replace(/\u0000/g, '')
-          .trim();
-        
-        // Remove markdown code blocks
-        cleanedResponse = cleanedResponse.replace(/```json\n?|```/g, '');
-        
-        // Try to extract JSON from the response if it's wrapped in text
-        const start = cleanedResponse.indexOf('{');
-        const end = cleanedResponse.lastIndexOf('}');
-        if (start !== -1 && end !== -1 && end > start) {
-          cleanedResponse = cleanedResponse.slice(start, end + 1);
+          // Normalize smart quotes and stray characters
+          cleanedResponse = cleanedResponse
+            .replace(/[""]/g, '"')
+            .replace(/['']/g, "'")
+            .replace(/\u0000/g, '')
+            .trim();
+          
+          // Remove markdown code blocks
+          cleanedResponse = cleanedResponse.replace(/```json\n?|```/g, '');
+          
+          // Try to extract JSON from the response if it's wrapped in text
+          const start = cleanedResponse.indexOf('{');
+          const end = cleanedResponse.lastIndexOf('}');
+          if (start !== -1 && end !== -1 && end > start) {
+            cleanedResponse = cleanedResponse.slice(start, end + 1);
+          }
+          
+          console.log('Attempting to parse AI response:', cleanedResponse.substring(0, 200) + '...');
+          roadmapData = JSON.parse(cleanedResponse);
         }
-        
-        console.log('Attempting to parse AI response:', cleanedResponse.substring(0, 200) + '...');
-        roadmapData = JSON.parse(cleanedResponse);
         
         // Validate the structure
         if (!roadmapData.phases || !Array.isArray(roadmapData.phases)) {
@@ -503,6 +567,8 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
       console.log('[Ambition] Clearing existing timers for new roadmap (fallback)');
       setTaskTimersState([]);
       await AsyncStorage.removeItem(STORAGE_KEYS.TASK_TIMERS);
+    } finally {
+      isGeneratingRoadmapRef.current = false;
     }
   };
 
@@ -613,8 +679,8 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
             description: 'Take ownership of deliverables through consistent daily contributions',
             tasks: [
               {
-                title: 'Run this week’s deliverable solo',
-                description: 'Own the full cycle (prep → execution → report); collect feedback from your lead',
+                title: 'Run this week\'s deliverable solo',
+                description: 'Own the full cycle (prep to execution to report); collect feedback from your lead',
                 estimatedTime: '2 h',
               },
               {
@@ -636,11 +702,19 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
 
   // Helper function to parse time string to minutes
   const parseTimeToMinutes = (timeStr: string): number => {
-    console.log(`[Timer] Parsing time string: "${timeStr}"`);
+    console.log(`[Timer] Parsing time string: "${timeStr}" (length: ${timeStr.length})`);
+    
+    // Handle empty or invalid input
+    if (!timeStr || typeof timeStr !== 'string') {
+      console.warn(`[Timer] Invalid time string: ${timeStr}`);
+      return 20; // Default to 20 minutes instead of 30
+    }
     
     // Handle different time formats
     const lowerTime = timeStr.toLowerCase().trim();
     let estimatedMinutes: number;
+    
+    console.log(`[Timer] Processed time string: "${lowerTime}"`);
     
     if (lowerTime.includes('h')) {
       // Handle hours (e.g., "1.5 h", "2 h")
@@ -648,43 +722,55 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
       if (hourMatch) {
         const hours = parseFloat(hourMatch[1]);
         estimatedMinutes = Math.round(hours * 60);
+        console.log(`[Timer] Parsed hours: ${hours} = ${estimatedMinutes} minutes`);
       } else {
-        estimatedMinutes = 60; // default to 1 hour
+        console.warn(`[Timer] Could not parse hours from: ${lowerTime}`);
+        estimatedMinutes = 20; // Default to 20 minutes
       }
     } else if (lowerTime.includes('min')) {
       // Handle minutes (e.g., "45 min", "30 min")
       const minMatch = lowerTime.match(/([0-9]+)\s*min/);
       if (minMatch) {
         estimatedMinutes = parseInt(minMatch[1]);
+        console.log(`[Timer] Parsed minutes: ${estimatedMinutes}`);
       } else {
-        estimatedMinutes = 30; // default to 30 minutes
+        console.warn(`[Timer] Could not parse minutes from: ${lowerTime}`);
+        estimatedMinutes = 20; // Default to 20 minutes
       }
     } else {
       // Try to extract any number and assume it's minutes
       const numberMatch = lowerTime.match(/([0-9]+)/);
       if (numberMatch) {
         estimatedMinutes = parseInt(numberMatch[1]);
+        console.log(`[Timer] Extracted number: ${estimatedMinutes} (assuming minutes)`);
       } else {
-        estimatedMinutes = 30; // default to 30 minutes
+        console.warn(`[Timer] No number found in: ${lowerTime}`);
+        estimatedMinutes = 20; // Default to 20 minutes
       }
     }
     
-    console.log(`[Timer] Parsed "${timeStr}" to ${estimatedMinutes} minutes`);
+    // Validate the result
+    if (isNaN(estimatedMinutes) || estimatedMinutes <= 0) {
+      console.warn(`[Timer] Invalid parsed result: ${estimatedMinutes}, using default`);
+      estimatedMinutes = 20;
+    }
+    
+    console.log(`[Timer] Final parsed result: "${timeStr}" -> ${estimatedMinutes} minutes`);
     return estimatedMinutes;
   };
 
   const startTaskTimer = async (taskId: string, estimatedTime: string) => {
     console.log(`[Timer] Starting timer for task ${taskId} with estimated time: ${estimatedTime}`);
+    console.log(`[Timer] Current active timers:`, taskTimers.filter(t => t.isActive).map(t => t.taskId));
     
-    // Stop any existing active timers for other tasks
-    const updatedExistingTimers = taskTimers.map(timer => {
-      if (timer.isActive && timer.taskId !== taskId) {
-        console.log(`[Timer] Stopping existing timer for task ${timer.taskId}`);
-        return { ...timer, isActive: false };
-      }
-      return timer;
-    });
+    // Check if this task already has an active timer
+    const existingTimer = taskTimers.find(timer => timer.taskId === taskId && timer.isActive);
+    if (existingTimer) {
+      console.log(`[Timer] Task ${taskId} already has an active timer, not starting a new one`);
+      return;
+    }
     
+    // Create new timer without affecting existing ones
     const duration = parseTimeToMinutes(estimatedTime);
     const newTimer: TaskTimer = {
       taskId,
@@ -696,17 +782,39 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     
     console.log(`[Timer] Created new timer:`, newTimer);
 
-    // Remove any existing timer for this task and add the new one
-    const updatedTimers = updatedExistingTimers.filter(t => t.taskId !== taskId).concat(newTimer);
+    // Add new timer while preserving all existing timers
+    const updatedTimers = [...taskTimers.filter(t => t.taskId !== taskId), newTimer];
     setTaskTimersState(updatedTimers);
     await AsyncStorage.setItem(STORAGE_KEYS.TASK_TIMERS, JSON.stringify(updatedTimers));
     
     console.log(`[Timer] Timer started successfully for task ${taskId}`);
+    console.log(`[Timer] All timers after start:`, updatedTimers.filter(t => t.isActive).map(t => t.taskId));
     analytics.track('task_started', { task_id: taskId, duration_minutes: duration });
+  };
+
+  const stopTaskTimer = async (taskId: string) => {
+    console.log(`[Timer] Stopping timer for task ${taskId}`);
+    
+    const updatedTimers = taskTimers.map(timer => {
+      if (timer.taskId === taskId && timer.isActive) {
+        console.log(`[Timer] Stopping timer for task ${timer.taskId}`);
+        return { ...timer, isActive: false };
+      }
+      return timer;
+    });
+    
+    setTaskTimersState(updatedTimers);
+    await AsyncStorage.setItem(STORAGE_KEYS.TASK_TIMERS, JSON.stringify(updatedTimers));
+    
+    console.log(`[Timer] Timer stopped successfully for task ${taskId}`);
   };
 
   const getTaskTimer = (taskId: string): TaskTimer | null => {
     return taskTimers.find(t => t.taskId === taskId) || null;
+  };
+
+  const getAllActiveTimers = (): TaskTimer[] => {
+    return taskTimers.filter(t => t.isActive);
   };
 
   const isTaskTimerComplete = (taskId: string): boolean => {
@@ -991,7 +1099,9 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     generateRoadmap,
     toggleTask,
     startTaskTimer,
+    stopTaskTimer,
     getTaskTimer,
+    getAllActiveTimers,
     isTaskTimerComplete,
     getTaskTimerProgress,
     getProgress,
@@ -1004,3 +1114,4 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     isPhaseUnlocked,
   };
 });
+

@@ -4,10 +4,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChevronRight, MessageCircle } from 'lucide-react-native';
-import { useAmbition } from '@/hooks/ambition-store';
+import { useAmbition } from '../hooks/ambition-store'
 
 export default function QuestionsIntroScreen() {
-  const { goal } = useAmbition();
+  const ambitionData = useAmbition();
+  const goal = ambitionData?.goal || '';
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
 

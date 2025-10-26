@@ -1,9 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Animated, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Animated, Platform, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Apple, Chrome, ArrowRight } from 'lucide-react-native';
+import { signInWithApple } from '../lib/supabase';
+import { signInWithGoogleNative } from '../lib/google-signin-native';
 
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
@@ -42,24 +44,61 @@ export default function LoginScreen() {
 
   const handleGoogleLogin = async () => {
     setIsLoading(true);
-    // Simulate login process
-    setTimeout(() => {
+    try {
+      console.log('🔵 Starting native Google Sign-In...');
+      
+      const { success, error } = await signInWithGoogleNative();
+      
+      if (!success || error) {
+        // Only show alert for actual errors, not user cancellation
+        if (error && !error.message?.includes('cancelled')) {
+          Alert.alert(
+            'Authentication Error',
+            error.message || 'Failed to sign in with Google. Please try again.',
+            [{ text: 'OK' }]
+          );
+          console.error('Google sign-in error:', error);
+        }
+      } else {
+        console.log('✅ Google sign-in successful!');
+        // Auth listener will handle navigation automatically
+      }
+    } catch (err) {
+      console.error('Unexpected error during Google sign-in:', err);
+      Alert.alert('Error', 'An unexpected error occurred. Please try again.');
+    } finally {
       setIsLoading(false);
-      router.push('/generating');
-    }, 1500);
+    }
   };
 
   const handleAppleLogin = async () => {
     setIsLoading(true);
-    // Simulate login process
-    setTimeout(() => {
+    try {
+      const { error } = await signInWithApple();
+      
+      if (error) {
+        Alert.alert(
+          'Authentication Error',
+          error.message || 'Failed to sign in with Apple. Please try again.',
+          [{ text: 'OK' }]
+        );
+        console.error('Apple sign-in error:', error);
+      } else {
+        // Success - user will be redirected by Supabase OAuth flow
+        console.log('Apple sign-in initiated successfully');
+      }
+    } catch (err) {
+      console.error('Unexpected error during Apple sign-in:', err);
+      Alert.alert('Error', 'An unexpected error occurred. Please try again.');
+    } finally {
       setIsLoading(false);
-      router.push('/generating');
-    }, 1500);
+    }
   };
 
   const handleSkip = () => {
-    router.push('/generating');
+    // Allow user to continue without authentication (guest mode)
+    console.log('User skipped authentication - continuing as guest');
+    router.push('/onboarding');
   };
 
   return (
