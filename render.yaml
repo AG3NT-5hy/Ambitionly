@@ -3,7 +3,7 @@ services:
     name: ambitionly-backend
     env: node
     plan: free
-    buildCommand: npm install; npx prisma generate --schema=./prisma/schema.prisma
+    buildCommand: npm install; npx prisma generate
     startCommand: npm run start:server
     envVars:
       - key: DATABASE_URL
