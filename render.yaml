@@ -5,7 +5,7 @@ services:
     plan: free
     nodeVersion: 18
     buildCommand: npm install && npm run build
-    startCommand: node dist/server.js
+    startCommand: node index.js
     envVars:
       - key: DATABASE_URL
         sync: false

@@ -9,7 +9,7 @@
     "dev": "tsx server.ts",
     "start:backend": "tsx server.ts",
     "start:server": "tsx server.ts",
-    "build": "npx prisma generate && npx tsc server.ts --outDir dist --target ES2022 --module ESNext --moduleResolution node --esModuleInterop true --skipLibCheck true --allowSyntheticDefaultImports true",
+    "build": "npx prisma generate",
     "lint": "expo lint",
     "db:generate": "npx prisma generate",
     "db:push": "npx prisma db push",
