@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "d9711205-5cd5-4b30-829c-2962f97d3b73"
+      }
+    },
+    "android": {
+      "package": "com.ag3nt.ambitionlyaigoalroadmapapp"
+    }
+  }
+}
