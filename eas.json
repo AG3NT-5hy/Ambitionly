@@ -6,20 +6,35 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_RORK_API_BASE_URL": "http://localhost:3000"
+      }
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_RORK_API_BASE_URL": "https://YOUR-BACKEND-URL"
+      }
     },
     "production": {
       "autoIncrement": true,
-      "version": "1.0.0"
+      "env": {
+        "NODE_ENV": "production",
+        "EXPO_PUBLIC_RORK_API_BASE_URL": "https://YOUR-BACKEND-URL"
+      },
+      "cache": {
+        "disabled": false
+      },
+      "node": "20.11.0",
+      "android": {
+        "buildType": "app-bundle"
+      }
     },
     "apk": {
       "android": {
         "buildType": "apk"
-      },
-      "version": "1.0.0"
+      }
     }
   },
   "submit": {
