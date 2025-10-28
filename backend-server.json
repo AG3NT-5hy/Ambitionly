@@ -1,0 +1,24 @@
+{
+  "name": "ambitionly-backend",
+  "version": "1.0.0",
+  "description": "Ambitionly Backend Server",
+  "main": "server.ts",
+  "scripts": {
+    "start": "node --loader tsx server.ts",
+    "start:prod": "node server.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.5",
+    "@hono/trpc-server": "^0.4.0",
+    "@prisma/client": "^6.17.1",
+    "hono": "^4.9.8",
+    "superjson": "^2.2.2",
+    "zod": "^4.1.11"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.20.6",
+    "typescript": "~5.9.2"
+  }
+}
+
