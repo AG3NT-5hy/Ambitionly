@@ -3,13 +3,13 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert,
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { User, Mail, LogOut, Save, Camera, AtSign, ArrowLeft } from 'lucide-react-native';
-import { useUser } from '../../hooks/user-store'
+import { useUnifiedUser } from '../../lib/unified-user-store'
 import { router } from 'expo-router';
 import { useUi } from '../../providers/UiProvider'
 import * as ImagePicker from 'expo-image-picker';
 
 export default function AccountScreen() {
-  const { user, signOut, signUp, updateProfilePicture } = useUser();
+  const { user, signOut, updateProfile } = useUnifiedUser();
   const { showToast } = useUi();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
@@ -18,6 +18,15 @@ export default function AccountScreen() {
   const [email, setEmail] = useState<string>(user?.email || '');
   const [username, setUsername] = useState<string>(user?.username || '');
   const [isEditing, setIsEditing] = useState<boolean>(false);
+
+  // Update local state when user changes
+  useEffect(() => {
+    if (user) {
+      setName(user.name || '');
+      setEmail(user.email || '');
+      setUsername(user.username || '');
+    }
+  }, [user]);
 
   useEffect(() => {
     Animated.parallel([
@@ -35,15 +44,17 @@ export default function AccountScreen() {
   }, [fadeAnim, slideAnim]);
 
   const handleSave = async () => {
-    if (!name.trim() || !email.trim()) {
-      showToast('Please fill in all fields', 'error');
+    if (!name.trim()) {
+      showToast('Please enter your name', 'error');
       return;
     }
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      showToast('Please enter a valid email', 'error');
-      return;
+    if (email.trim()) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        showToast('Please enter a valid email', 'error');
+        return;
+      }
     }
 
     if (username.trim() && !/^[a-zA-Z0-9_]{3,20}$/.test(username.trim())) {
@@ -52,7 +63,10 @@ export default function AccountScreen() {
     }
 
     try {
-      await signUp(email, name, username.trim() || undefined);
+      await updateProfile({
+        name: name.trim(),
+        username: username.trim() || undefined,
+      });
       setIsEditing(false);
       showToast('Account updated successfully', 'success');
     } catch (error) {
@@ -78,7 +92,9 @@ export default function AccountScreen() {
       });
 
       if (!result.canceled && result.assets[0]) {
-        await updateProfilePicture(result.assets[0].uri);
+        await updateProfile({
+          profilePicture: result.assets[0].uri,
+        });
         showToast('Profile picture updated', 'success');
       }
     } catch (error) {
@@ -160,11 +176,11 @@ export default function AccountScreen() {
                   <Camera size={16} color="#FFFFFF" />
                 </TouchableOpacity>
               </View>
-              <Text style={styles.profileName}>{user?.name || 'Guest User'}</Text>
+              <Text style={styles.profileName}>{user?.name || (user?.isGuest ? 'Guest User' : 'User')}</Text>
               {user?.username && (
                 <Text style={styles.profileUsername}>@{user.username}</Text>
               )}
-              <Text style={styles.profileEmail}>{user?.email || 'No email set'}</Text>
+              <Text style={styles.profileEmail}>{user?.email || (user?.isGuest ? 'No email set' : 'No email')}</Text>
             </View>
 
             <View style={styles.section}>
@@ -210,22 +226,23 @@ export default function AccountScreen() {
                   />
                 </View>
 
-                <View style={styles.inputGroup}>
-                  <View style={styles.inputLabel}>
-                    <Mail size={18} color="#00E6E6" />
-                    <Text style={styles.inputLabelText}>Email</Text>
+                {!user?.isGuest && (
+                  <View style={styles.inputGroup}>
+                    <View style={styles.inputLabel}>
+                      <Mail size={18} color="#00E6E6" />
+                      <Text style={styles.inputLabelText}>Email</Text>
+                    </View>
+                    <TextInput
+                      style={[styles.input, styles.inputDisabled]}
+                      value={email}
+                      placeholder="Email (cannot be changed)"
+                      placeholderTextColor="#666666"
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      editable={false}
+                    />
                   </View>
-                  <TextInput
-                    style={[styles.input, !isEditing && styles.inputDisabled]}
-                    value={email}
-                    onChangeText={setEmail}
-                    placeholder="Enter your email"
-                    placeholderTextColor="#666666"
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                    editable={isEditing}
-                  />
-                </View>
+                )}
 
                 {isEditing && (
                   <View style={styles.buttonRow}>

@@ -81,6 +81,12 @@ export default function RoadmapScreen() {
     return () => clearInterval(interval);
   }, []);
 
+  // Reset sign-up check and paywall when user registration status changes
+  useEffect(() => {
+    setHasCheckedSignUp(false);
+    setPaywallDismissed(false);
+  }, [isRegistered]);
+
   const progress = getProgress();
   const streak = getStreak();
   const shouldShowPaywallNow = shouldShowPaywall(completedTasks.length);
