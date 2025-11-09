@@ -460,6 +460,11 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         'Include a mix of learning, practicing, building, and demonstrating skills',
         'Tasks should be measurable with clear completion criteria',
         'Focus on real-world application and skill development',
+        'IMPORTANT: Avoid repetitive task types across milestones - vary task types significantly',
+        'Do NOT include journaling, reflection, or tracking tasks in every milestone - use them sparingly (maximum once per phase, if at all)',
+        'Prioritize action-oriented tasks: building, creating, practicing, implementing, researching, designing, coding, writing, analyzing, etc.',
+        'Each milestone should have diverse task types - avoid patterns like "journal about X" appearing multiple times',
+        'Focus on tasks that produce tangible outputs or measurable progress toward the goal',
       ].join('\n- ');
 
       const industry = inferIndustry(sanitizedGoal, sanitizedAnswers);
@@ -485,6 +490,10 @@ Create a comprehensive roadmap that:
 - Include both learning and practical application tasks
 - Make tasks specific enough that the user knows exactly what to do
 - Ensure tasks build on each other logically
+- Vary task types significantly across milestones - avoid repetitive patterns
+- Focus on action-oriented tasks that produce tangible outputs (build, create, practice, implement, research, design, code, write, analyze)
+- Use journaling, reflection, or tracking tasks very sparingly (maximum once per phase, only if truly necessary)
+- Each milestone should feel distinct with diverse task types that avoid repetition
 
 Requirements:
 - ${constraints}
@@ -518,7 +527,7 @@ Output ONLY valid JSON in this exact format:
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: [
-            { role: 'system', content: 'You are an expert career and skill development coach. Create comprehensive, actionable roadmaps that break down ambitious goals into achievable steps. Focus on practical, real-world tasks that build skills progressively. Each task should be specific, measurable, and directly contribute to achieving the stated goal. Output valid JSON only.' },
+            { role: 'system', content: 'You are an expert career and skill development coach. Create comprehensive, actionable roadmaps that break down ambitious goals into achievable steps. Focus on practical, real-world tasks that build skills progressively. Each task should be specific, measurable, and directly contribute to achieving the stated goal. IMPORTANT: Vary task types significantly across milestones - avoid repetitive patterns like journaling or reflection tasks appearing in every milestone. Prioritize action-oriented tasks that produce tangible outputs. Use journaling/reflection tasks very sparingly (maximum once per phase, if at all). Output valid JSON only.' },
             { role: 'user', content: prompt },
           ],
         }),
