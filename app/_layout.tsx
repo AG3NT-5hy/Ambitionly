@@ -2,6 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
+import { View, StyleSheet } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { initSentry } from "../lib/error-reporting";
 import { analytics } from "../lib/analytics";
 import { StyleSheet, Platform, Dimensions } from "react-native";
@@ -179,7 +181,14 @@ export default function RootLayout() {
   }, []);
 
   if (!isReady) {
-    return null;
+    return (
+      <View style={{ flex: 1, backgroundColor: '#000000' }}>
+        <LinearGradient
+          colors={['#000000', '#29202B', '#000000']}
+          style={StyleSheet.absoluteFillObject}
+        />
+      </View>
+    );
   }
 
   return (
