@@ -273,15 +273,21 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         const wasComplete = previousTimerStates.current.get(timer.taskId) || false;
         const isNowComplete = isTaskTimerComplete(timer.taskId);
         const notificationKey = `${timer.taskId}-${timer.startTime}`;
+        
+        // Calculate elapsed time to ensure timer has actually been running
+        const elapsed = Date.now() - timer.startTime;
+        const minimumElapsed = 1000; // At least 1 second must have passed
 
         // Only send fallback notification if:
-        // 1. Timer just completed
+        // 1. Timer just completed (transitioned from not complete to complete)
         // 2. We haven't sent a notification for this timer instance
         // 3. No notification was scheduled (notificationId is null/undefined)
+        // 4. Timer has been running for at least 1 second (prevents immediate triggers)
         // This prevents duplicate notifications when scheduled notifications work
         if (!wasComplete && isNowComplete && 
             !notificationSentRef.current.has(notificationKey) &&
-            !timer.notificationId) {
+            !timer.notificationId &&
+            elapsed >= minimumElapsed) {
           console.log(`[Notifications] Timer completed for task ${timer.taskId} - sending fallback notification (scheduled notification may have failed)`);
           
           // Find the task title for the notification

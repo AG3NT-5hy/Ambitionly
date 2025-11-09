@@ -155,11 +155,19 @@ export class NotificationService {
       let trigger: Notifications.NotificationTriggerInput | null = null;
       if (triggerInSeconds && triggerInSeconds > 0) {
         // Use exact date/time for better reliability
+        // Add a small buffer to ensure it's in the future
         const triggerDate = new Date(Date.now() + triggerInSeconds * 1000);
+        // Ensure trigger is at least 1 second in the future
+        if (triggerDate.getTime() <= Date.now() + 1000) {
+          triggerDate.setTime(Date.now() + 1000);
+        }
         trigger = {
           date: triggerDate,
         };
         console.log(`[Notifications] Scheduling notification for ${triggerInSeconds} seconds (${triggerDate.toISOString()})`);
+      } else {
+        // If no trigger specified, this should not be called for scheduled notifications
+        console.warn('[Notifications] scheduleTaskCompleteNotification called without triggerInSeconds - notification will be sent immediately');
       }
 
       const notificationIdentifier = `task-timer-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
