@@ -14,14 +14,14 @@
     "preview": {
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_RORK_API_BASE_URL": "https://YOUR-BACKEND-URL"
+        "EXPO_PUBLIC_RORK_API_BASE_URL": "https://ambitionly.onrender.com"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
         "NODE_ENV": "production",
-        "EXPO_PUBLIC_RORK_API_BASE_URL": "https://YOUR-BACKEND-URL"
+        "EXPO_PUBLIC_RORK_API_BASE_URL": "https://ambitionly.onrender.com"
       },
       "cache": {
         "disabled": false
@@ -35,6 +35,9 @@
       "node": "20.11.0",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_RORK_API_BASE_URL": "https://ambitionly.onrender.com"
       }
     }
   },
