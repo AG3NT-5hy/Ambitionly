@@ -342,14 +342,14 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       
       // 5. Create user object
       const userData: UnifiedUser = {
-        id: dbUser.id,
-        email: dbUser.email,
-        name: dbUser.name,
-        username: dbUser.username,
-        profilePicture: dbUser.profilePicture,
+        id: dbUser.id || authData.user.id,
+        email: dbUser.email || authData.user.email || null,
+        name: dbUser.name || null,
+        username: dbUser.username || null,
+        profilePicture: dbUser.profilePicture || null,
         mode: 'registered',
         isGuest: false,
-        createdAt: new Date(dbUser.createdAt),
+        createdAt: dbUser.createdAt ? new Date(dbUser.createdAt) : new Date(),
         subscriptionPlan: (dbUser.subscriptionPlan || 'free') as any,
         subscriptionStatus: dbUser.subscriptionStatus as any,
         subscriptionExpiresAt: dbUser.subscriptionExpiresAt ? new Date(dbUser.subscriptionExpiresAt) : null,

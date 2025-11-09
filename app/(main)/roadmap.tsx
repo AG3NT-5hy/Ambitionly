@@ -126,10 +126,13 @@ export default function RoadmapScreen() {
     // Find the first unlocked, incomplete task in natural roadmap order
     for (let phaseIndex = 0; phaseIndex < roadmap.phases.length; phaseIndex++) {
       const phase = roadmap.phases[phaseIndex];
+      if (!phase?.milestones) continue;
       for (let milestoneIndex = 0; milestoneIndex < phase.milestones.length; milestoneIndex++) {
         const milestone = phase.milestones[milestoneIndex];
+        if (!milestone?.tasks) continue;
         for (let taskIndex = 0; taskIndex < milestone.tasks.length; taskIndex++) {
           const task = milestone.tasks[taskIndex];
+          if (!task) continue;
           
           const isCompleted = completedTasks.includes(task.id);
           const isUnlocked = isTaskUnlocked(phaseIndex, milestoneIndex, taskIndex);
@@ -204,10 +207,13 @@ export default function RoadmapScreen() {
       if (roadmap?.phases) {
         for (let phaseIndex = 0; phaseIndex < roadmap.phases.length; phaseIndex++) {
           const phase = roadmap.phases[phaseIndex];
+          if (!phase?.milestones) continue;
           for (let milestoneIndex = 0; milestoneIndex < phase.milestones.length; milestoneIndex++) {
             const milestone = phase.milestones[milestoneIndex];
+            if (!milestone?.tasks) continue;
             for (let taskIndex = 0; taskIndex < milestone.tasks.length; taskIndex++) {
               const task = milestone.tasks[taskIndex];
+              if (!task) continue;
               if (task.id === taskId && isTaskUnlocked(phaseIndex, milestoneIndex, taskIndex)) {
                 canToggle = true;
                 break;
@@ -523,7 +529,7 @@ export default function RoadmapScreen() {
           onClose={() => {
             setShowSignUpModal(false);
           }}
-          onSignUp={async (email: string, password: string, name: string) => {
+          onSignUp={async (email: string, password: string, name: string, username?: string) => {
             try {
               await signUp(email, password, name);
               setShowSignUpModal(false);

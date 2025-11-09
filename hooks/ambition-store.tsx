@@ -878,10 +878,12 @@ Output ONLY valid JSON in this exact format:
     let taskTitle = 'Task';
     if (roadmap?.phases) {
       for (const phase of roadmap.phases) {
+        if (!phase?.milestones) continue;
         for (const milestone of phase.milestones) {
+          if (!milestone?.tasks) continue;
           const task = milestone.tasks.find(t => t.id === taskId);
           if (task) {
-            taskTitle = task.title;
+            taskTitle = task.title || 'Task';
             break;
           }
         }
