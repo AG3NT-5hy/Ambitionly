@@ -8,7 +8,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import Purchases from 'react-native-purchases';
 import { supabase } from './supabase';
-import { trpc } from './trpc';
+import { trpc, trpcClient } from './trpc';
+import type { AppRouter } from '../backend/trpc/app-router';
+import { createTRPCProxyClient, httpLink } from '@trpc/client';
+import superjson from 'superjson';
 import { collectGuestData, clearGuestData, backupGuestData } from './user-data-migration';
 import { STORAGE_KEYS } from '../constants';
 
@@ -40,6 +43,11 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
   const [isHydrated, setIsHydrated] = useState(false);
   const [user, setUserInternal] = useState<UnifiedUser | null>(null);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
+
+  // Use tRPC hooks for mutations
+  const signupMutation = trpc.auth.signup.useMutation();
+  const createUserMutation = trpc.user.create.useMutation();
+  const updateUserMutation = trpc.user.update.useMutation();
 
   // Load user on init
   useEffect(() => {
@@ -153,7 +161,7 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       // 1. Create user via backend (this auto-confirms email and creates Supabase user)
       let supabaseUserId: string | null = null;
       try {
-        const signupResult = await trpc.auth.signup.mutate({
+        const signupResult = await signupMutation.mutateAsync({
           email,
           password,
         });
@@ -217,7 +225,7 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       
       // 5. Create user in database with guest data
       try {
-        await trpc.user.create.mutate({
+        await createUserMutation.mutateAsync({
           email,
           name,
           supabaseId: supabaseUserId,
@@ -301,8 +309,27 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         console.warn('[UnifiedUser] RevenueCat login failed:', rcError);
       }
       
-      // 3. Fetch user data from database
-      const result = await trpc.user.get.query({ supabaseId: authData.user.id });
+      // 3. Fetch user data from database using direct client
+      const getBaseUrl = () => {
+        if (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_RORK_API_BASE_URL) {
+          const url = process.env.EXPO_PUBLIC_RORK_API_BASE_URL;
+          if (url && !url.includes('localhost') && !url.includes('127.0.0.1')) {
+            return url;
+          }
+        }
+        return 'http://localhost:3000';
+      };
+      
+      const directClient = createTRPCProxyClient<AppRouter>({
+        transformer: superjson,
+        links: [
+          httpLink({
+            url: `${getBaseUrl()}/api/trpc`,
+          }),
+        ],
+      });
+      
+      const result = await directClient.user.get.query({ supabaseId: authData.user.id });
       
       if (!result.success || !result.user) {
         throw new Error('User data not found in database');
@@ -429,7 +456,7 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
     try {
       console.log('[UnifiedUser] Syncing to database:', userData.email);
       
-      await trpc.user.update.mutate({
+      await updateUserMutation.mutateAsync({
         email: userData.email!,
         name: userData.name,
         username: userData.username,
