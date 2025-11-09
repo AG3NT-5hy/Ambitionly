@@ -233,7 +233,8 @@ export default function PhasesScreen() {
             ]}
           >
           <ScrollView style={styles.phasesContainer} showsVerticalScrollIndicator={false}>
-            {roadmap.phases.map((phase, phaseIndex) => {
+            {roadmap.phases?.map((phase, phaseIndex) => {
+              if (!phase) return null;
               const phaseUnlocked = isPhaseUnlocked(phaseIndex);
               
               // Hide premium phases for non-subscribers
@@ -274,7 +275,8 @@ export default function PhasesScreen() {
                     </View>
                   )}
 
-                  {phaseUnlocked && !showSubscriptionBlur && phase.milestones.map((milestone, milestoneIndex) => {
+                  {phaseUnlocked && !showSubscriptionBlur && phase.milestones?.map((milestone, milestoneIndex) => {
+                    if (!milestone) return null;
                     const milestoneUnlocked = isMilestoneUnlocked(phaseIndex, milestoneIndex);
                     
                     // Show subscription blur for premium milestones
@@ -307,7 +309,8 @@ export default function PhasesScreen() {
 
                         {milestoneUnlocked && !showMilestoneSubscriptionBlur && (
                           <View style={styles.tasksContainer}>
-                            {milestone.tasks.map((task, taskIndex) => {
+                            {milestone.tasks?.map((task, taskIndex) => {
+                              if (!task) return null;
                               const isCompleted = completedTasks.includes(task.id);
                               const taskUnlocked = isTaskUnlocked(phaseIndex, milestoneIndex, taskIndex);
                               
