@@ -150,16 +150,60 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
     try {
       console.log('[UnifiedUser] Starting sign up for:', email);
       
-      // 1. Create Supabase account
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email,
-        password,
-      });
+      // 1. Create user via backend (this auto-confirms email and creates Supabase user)
+      let supabaseUserId: string | null = null;
+      try {
+        const signupResult = await trpc.auth.signup.mutate({
+          email,
+          password,
+        });
+        supabaseUserId = signupResult.supabaseUserId || null;
+        console.log('[UnifiedUser] ✅ User created via backend, Supabase ID:', supabaseUserId);
+      } catch (backendError: any) {
+        // If user already exists, try to sign in instead
+        if (backendError?.message?.includes('already registered') || backendError?.message?.includes('Email already')) {
+          console.log('[UnifiedUser] User already exists, attempting sign in...');
+          // Try to sign in with Supabase to get the user ID
+          const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+            email,
+            password,
+          });
+          if (signInError) throw signInError;
+          if (signInData.user) {
+            supabaseUserId = signInData.user.id;
+          }
+        } else {
+          throw backendError;
+        }
+      }
       
-      if (authError) throw authError;
-      if (!authData.user) throw new Error('Failed to create user account');
+      // 2. If backend didn't create Supabase user, create it directly
+      if (!supabaseUserId) {
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email,
+          password,
+        });
+        
+        if (authError) throw authError;
+        if (!authData.user) throw new Error('Failed to create user account');
+        supabaseUserId = authData.user.id;
+      } else {
+        // Sign in with Supabase to establish session
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (signInError) {
+          console.warn('[UnifiedUser] Failed to sign in with Supabase after backend signup:', signInError);
+          // Continue anyway - user is created
+        }
+      }
       
-      // 2. Set RevenueCat user ID to email
+      if (!supabaseUserId) {
+        throw new Error('Failed to get Supabase user ID');
+      }
+      
+      // 3. Set RevenueCat user ID to email
       try {
         await Purchases.logIn(email);
         console.log('[UnifiedUser] RevenueCat user set to:', email);
@@ -167,16 +211,16 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         console.warn('[UnifiedUser] RevenueCat login failed:', rcError);
       }
       
-      // 3. Collect guest data for migration
+      // 4. Collect guest data for migration
       const guestData = await collectGuestData();
       console.log('[UnifiedUser] Guest data collected for migration');
       
-      // 4. Create user in database with guest data
+      // 5. Create user in database with guest data
       try {
         await trpc.user.create.mutate({
           email,
           name,
-          supabaseId: authData.user.id,
+          supabaseId: supabaseUserId,
           revenueCatUserId: email,
           isGuest: false,
           guestData: {
@@ -200,9 +244,9 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         // Continue anyway - data is in Supabase
       }
       
-      // 5. Create registered user object
+      // 6. Create registered user object
       const registeredUser: UnifiedUser = {
-        id: authData.user.id,
+        id: supabaseUserId,
         email,
         name,
         username: null,
@@ -216,10 +260,10 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         subscriptionPurchasedAt: guestData.subscriptionPurchasedAt,
       };
       
-      // 6. Save to local storage
+      // 7. Save to local storage
       await saveUser(registeredUser);
       
-      // 7. Clear old guest data
+      // 8. Clear old guest data
       await clearGuestData();
       
       console.log('[UnifiedUser] ✅ Sign up complete, guest data migrated');
