@@ -31,11 +31,6 @@ export interface UnifiedUser {
   subscriptionPurchasedAt: Date | null;
 }
 
-const STORAGE_KEYS = {
-  USER: 'ambitionly_unified_user',
-  GUEST_ID: 'ambitionly_guest_id',
-};
-
 // Generate a unique guest ID
 const generateGuestId = () => {
   return `guest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;

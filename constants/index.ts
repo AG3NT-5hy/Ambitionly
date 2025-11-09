@@ -18,6 +18,8 @@ export const REVENUECAT_CONFIG = {
 
 // Storage Keys
 export const STORAGE_KEYS = {
+  USER: 'ambitionly_unified_user',
+  GUEST_ID: 'ambitionly_guest_id',
   GOAL: 'ambitionly_goal',
   TIMELINE: 'ambitionly_timeline',
   TIME_COMMITMENT: 'ambitionly_time_commitment',
