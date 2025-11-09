@@ -104,9 +104,14 @@ export default function EmailViewerFallback() {
   }
 
   if (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const apiUrl = process.env.EXPO_PUBLIC_RORK_API_BASE_URL || 'http://localhost:3000';
+    
     return (
       <View style={styles.centerContainer}>
         <Text style={styles.errorText}>Failed to load emails</Text>
+        <Text style={styles.errorDetail}>{errorMessage}</Text>
+        <Text style={styles.errorDetail}>API URL: {apiUrl}</Text>
         <TouchableOpacity style={styles.retryButton} onPress={() => refetch()}>
           <RefreshCw size={16} color={COLORS.PRIMARY} />
           <Text style={styles.retryButtonText}>Retry</Text>
@@ -290,7 +295,13 @@ const styles = StyleSheet.create({
   errorText: {
     color: COLORS.ERROR,
     fontSize: 16,
-    marginBottom: 16,
+    marginBottom: 8,
+  },
+  errorDetail: {
+    color: COLORS.TEXT_MUTED,
+    fontSize: 12,
+    marginBottom: 4,
+    textAlign: 'center',
   },
   retryButton: {
     flexDirection: 'row',
