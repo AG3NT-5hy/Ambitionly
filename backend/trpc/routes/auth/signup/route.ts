@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import { publicProcedure } from '../../../create-context';
 import { prisma } from '../../../../../lib/prisma'
-import { supabase } from '../../../../../lib/supabase'
-import { supabaseUserDataService } from '../../../../../lib/supabase-user-data'
+import { supabaseAdmin } from '../../../lib/supabase'
+import { supabaseUserDataService } from '../../../lib/supabase-user-data'
 import { emailStorageService } from '../../../../../lib/email-storage'
 import * as crypto from 'crypto';
 
@@ -45,7 +45,7 @@ export const signupProcedure = publicProcedure
       // Create corresponding user in Supabase
       let supabaseUserId: string | null = null;
       try {
-        const { data: supabaseData, error: supabaseError } = await supabase.auth.admin.createUser({
+        const { data: supabaseData, error: supabaseError } = await supabaseAdmin.auth.admin.createUser({
           email: input.email,
           password: input.password,
           email_confirm: true, // Auto-confirm for now

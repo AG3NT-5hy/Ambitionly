@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { publicProcedure } from '../../../create-context';
 import { prisma } from '../../../../../lib/prisma'
-import { supabaseUserDataService } from '../../../../../lib/supabase-user-data'
+import { supabaseUserDataService } from '../../../lib/supabase-user-data'
 import { emailStorageService } from '../../../../../lib/email-storage'
 import * as crypto from 'crypto';
 

@@ -5,7 +5,7 @@ services:
     plan: free
     nodeVersion: 18
     buildCommand: npm install && npm run build
-    startCommand: npx tsx server.ts
+    startCommand: npx tsx --tsconfig backend/tsconfig.json server.ts
     envVars:
       - key: DATABASE_URL
         sync: false

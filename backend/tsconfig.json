@@ -19,12 +19,24 @@
   },
   "include": [
     "../backend/**/*",
-    "../server.ts"
+    "../server.ts",
+    "../lib/database.ts",
+    "../lib/prisma.ts",
+    "../lib/email-storage.ts"
   ],
   "exclude": [
     "node_modules",
     "dist",
-    "build"
+    "build",
+    "../app/**/*",
+    "../components/**/*",
+    "../hooks/**/*",
+    "../lib/supabase.ts",
+    "../lib/supabase-user-data.ts",
+    "../lib/**/*.tsx",
+    "../providers/**/*",
+    "../constants/**/*",
+    "**/*.tsx"
   ]
 }
 
