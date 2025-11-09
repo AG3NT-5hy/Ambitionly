@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { protectedProcedure } from '../../../create-context';
-import { db } from '../../../../lib/database';
+import { db } from '../../../../../lib/database';
 import * as bcrypt from 'bcryptjs';
 
 const createUserSchema = z.object({
