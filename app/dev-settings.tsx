@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -48,6 +48,17 @@ const DevSettingsScreen: React.FC = () => {
       refreshLogs();
     }
   }, [isAuthenticated]);
+
+  // Auto-refresh logs every 2 seconds when authenticated
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const interval = setInterval(() => {
+      refreshLogs(logLevelFilter);
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [isAuthenticated, logLevelFilter, refreshLogs]);
 
   const handleLogin = () => {
     setLoginError('');
@@ -99,11 +110,11 @@ const DevSettingsScreen: React.FC = () => {
     log.info('DevSettings', `Analytics toggled: ${newEnabled}`);
   };
 
-  const refreshLogs = (level?: 'debug' | 'info' | 'warn' | 'error') => {
+  const refreshLogs = useCallback((level?: 'debug' | 'info' | 'warn' | 'error') => {
     const next = debugService.getLogs(level, undefined, 200);
     setLogs(next);
     setLogLevelFilter(level);
-  };
+  }, []);
 
   const handleExportLogs = async () => {
     try {
