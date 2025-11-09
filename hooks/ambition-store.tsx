@@ -461,9 +461,10 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         'Tasks should be measurable with clear completion criteria',
         'Focus on real-world application and skill development',
         'IMPORTANT: Avoid repetitive task types across milestones - vary task types significantly',
-        'Do NOT include journaling, reflection, or tracking tasks in every milestone - use them sparingly (maximum once per phase, if at all)',
+        'Journaling and reflection tasks are valuable but should be varied - do NOT include the same type of journaling task in every milestone',
+        'If including journaling tasks, vary their purpose and format (e.g., progress reflection, learning journal, goal review, challenge analysis)',
         'Prioritize action-oriented tasks: building, creating, practicing, implementing, researching, designing, coding, writing, analyzing, etc.',
-        'Each milestone should have diverse task types - avoid patterns like "journal about X" appearing multiple times',
+        'Each milestone should have diverse task types - avoid repetitive patterns where the same task type appears in multiple milestones',
         'Focus on tasks that produce tangible outputs or measurable progress toward the goal',
       ].join('\n- ');
 
@@ -492,7 +493,8 @@ Create a comprehensive roadmap that:
 - Ensure tasks build on each other logically
 - Vary task types significantly across milestones - avoid repetitive patterns
 - Focus on action-oriented tasks that produce tangible outputs (build, create, practice, implement, research, design, code, write, analyze)
-- Use journaling, reflection, or tracking tasks very sparingly (maximum once per phase, only if truly necessary)
+- Journaling and reflection tasks are valuable - include them when appropriate, but vary their purpose and format across milestones
+- Avoid including the same type of journaling/reflection task in every milestone - if using journaling, make each instance serve a different purpose
 - Each milestone should feel distinct with diverse task types that avoid repetition
 
 Requirements:
@@ -527,7 +529,7 @@ Output ONLY valid JSON in this exact format:
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: [
-            { role: 'system', content: 'You are an expert career and skill development coach. Create comprehensive, actionable roadmaps that break down ambitious goals into achievable steps. Focus on practical, real-world tasks that build skills progressively. Each task should be specific, measurable, and directly contribute to achieving the stated goal. IMPORTANT: Vary task types significantly across milestones - avoid repetitive patterns like journaling or reflection tasks appearing in every milestone. Prioritize action-oriented tasks that produce tangible outputs. Use journaling/reflection tasks very sparingly (maximum once per phase, if at all). Output valid JSON only.' },
+            { role: 'system', content: 'You are an expert career and skill development coach. Create comprehensive, actionable roadmaps that break down ambitious goals into achievable steps. Focus on practical, real-world tasks that build skills progressively. Each task should be specific, measurable, and directly contribute to achieving the stated goal. IMPORTANT: Vary task types significantly across milestones - avoid repetitive patterns. Journaling and reflection tasks are valuable and can be included, but vary their purpose and format (e.g., progress reflection, learning journal, goal review) - do NOT include the same type of journaling task in every milestone. Prioritize action-oriented tasks that produce tangible outputs. Output valid JSON only.' },
             { role: 'user', content: prompt },
           ],
         }),
