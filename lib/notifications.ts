@@ -156,18 +156,27 @@ export class NotificationService {
       if (triggerInSeconds && triggerInSeconds > 0) {
         // Use exact date/time for better reliability
         // Add a small buffer to ensure it's in the future
-        const triggerDate = new Date(Date.now() + triggerInSeconds * 1000);
-        // Ensure trigger is at least 1 second in the future
-        if (triggerDate.getTime() <= Date.now() + 1000) {
-          triggerDate.setTime(Date.now() + 1000);
+        const now = Date.now();
+        const triggerTime = now + (triggerInSeconds * 1000);
+        const triggerDate = new Date(triggerTime);
+        
+        // Ensure trigger is at least 5 seconds in the future to prevent immediate firing
+        const minimumFutureTime = now + 5000; // 5 seconds minimum
+        if (triggerDate.getTime() < minimumFutureTime) {
+          console.warn(`[Notifications] Trigger time ${triggerInSeconds}s is too soon, adjusting to minimum 5 seconds`);
+          triggerDate.setTime(minimumFutureTime);
         }
+        
         trigger = {
           date: triggerDate,
         };
-        console.log(`[Notifications] Scheduling notification for ${triggerInSeconds} seconds (${triggerDate.toISOString()})`);
+        const secondsUntilTrigger = Math.round((triggerDate.getTime() - now) / 1000);
+        console.log(`[Notifications] Scheduling notification for ${triggerInSeconds} seconds (${triggerDate.toISOString()}, ${secondsUntilTrigger}s from now)`);
       } else {
         // If no trigger specified, this should not be called for scheduled notifications
         console.warn('[Notifications] scheduleTaskCompleteNotification called without triggerInSeconds - notification will be sent immediately');
+        // Don't schedule if no trigger - return null to indicate no notification was scheduled
+        return null;
       }
 
       const notificationIdentifier = `task-timer-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
