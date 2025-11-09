@@ -1,21 +1,27 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, KeyboardAvoidingView, Platform, Animated, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { X, Mail, User as UserIcon, Shield, Cloud, Bell, Lock } from 'lucide-react-native';
+import { X, Mail, User as UserIcon, Shield, Cloud, Bell, Lock, Eye, EyeOff } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
+type AuthMode = 'signup' | 'signin';
+
 interface SignUpScreenProps {
   onClose: () => void;
-  onSignUp: (email: string, name: string, username?: string) => void;
+  onSignUp: (email: string, password: string, name: string, username?: string) => Promise<void>;
+  onSignIn?: (email: string, password: string) => Promise<void>;
 }
 
-export default function SignUpScreen({ onClose, onSignUp }: SignUpScreenProps) {
+export default function SignUpScreen({ onClose, onSignUp, onSignIn }: SignUpScreenProps) {
   const insets = useSafeAreaInsets();
+  const [mode, setMode] = useState<AuthMode>('signup');
   const [email, setEmail] = useState<string>('');
+  const [password, setPassword] = useState<string>('');
   const [name, setName] = useState<string>('');
   const [username, setUsername] = useState<string>('');
+  const [showPassword, setShowPassword] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
@@ -146,13 +152,8 @@ export default function SignUpScreen({ onClose, onSignUp }: SignUpScreenProps) {
     return emailRegex.test(email);
   };
 
-  const handleSignUp = async () => {
+  const handleSubmit = async () => {
     setError('');
-
-    if (!name.trim()) {
-      setError('Please enter your name');
-      return;
-    }
 
     if (!email.trim()) {
       setError('Please enter your email');
@@ -164,17 +165,38 @@ export default function SignUpScreen({ onClose, onSignUp }: SignUpScreenProps) {
       return;
     }
 
-    if (username.trim() && !/^[a-zA-Z0-9_]{3,20}$/.test(username.trim())) {
-      setError('Username must be 3-20 characters (letters, numbers, underscore)');
+    if (!password.trim()) {
+      setError('Please enter your password');
       return;
+    }
+
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters');
+      return;
+    }
+
+    if (mode === 'signup') {
+      if (!name.trim()) {
+        setError('Please enter your name');
+        return;
+      }
+
+      if (username.trim() && !/^[a-zA-Z0-9_]{3,20}$/.test(username.trim())) {
+        setError('Username must be 3-20 characters (letters, numbers, underscore)');
+        return;
+      }
     }
 
     setIsLoading(true);
 
     try {
-      await onSignUp(email, name, username.trim() || undefined);
+      if (mode === 'signup') {
+        await onSignUp(email, password, name, username.trim() || undefined);
+      } else if (mode === 'signin' && onSignIn) {
+        await onSignIn(email, password);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to sign up');
+      setError(err instanceof Error ? err.message : `Failed to ${mode === 'signup' ? 'sign up' : 'sign in'}`);
       setIsLoading(false);
     }
   };
@@ -428,44 +450,78 @@ export default function SignUpScreen({ onClose, onSignUp }: SignUpScreenProps) {
                 </LinearGradient>
               </Animated.View>
 
-              <Text style={styles.title}>Save Your Progress</Text>
+              <Text style={styles.title}>
+                {mode === 'signup' ? 'Save Your Progress' : 'Welcome Back'}
+              </Text>
               <Text style={styles.subtitle}>
-                Sign up to keep your roadmap and tasks saved across all your devices
+                {mode === 'signup' 
+                  ? 'Sign up to keep your roadmap and tasks saved across all your devices'
+                  : 'Sign in to access your saved progress and continue your journey'}
               </Text>
             </View>
 
-            <View style={styles.form}>
-              <View style={styles.inputContainer}>
-                <View style={styles.inputIconContainer}>
-                  <UserIcon size={20} color="#9A9A9A" />
-                </View>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Your name"
-                  placeholderTextColor="#666666"
-                  value={name}
-                  onChangeText={setName}
-                  autoCapitalize="words"
-                  autoCorrect={false}
-                  testID="name-input"
-                />
-              </View>
+            {/* Mode Toggle */}
+            <View style={styles.modeToggle}>
+              <TouchableOpacity
+                style={[styles.modeButton, mode === 'signup' && styles.modeButtonActive]}
+                onPress={() => {
+                  setMode('signup');
+                  setError('');
+                }}
+              >
+                <Text style={[styles.modeButtonText, mode === 'signup' && styles.modeButtonTextActive]}>
+                  Sign Up
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modeButton, mode === 'signin' && styles.modeButtonActive]}
+                onPress={() => {
+                  setMode('signin');
+                  setError('');
+                }}
+              >
+                <Text style={[styles.modeButtonText, mode === 'signin' && styles.modeButtonTextActive]}>
+                  Sign In
+                </Text>
+              </TouchableOpacity>
+            </View>
 
-              <View style={styles.inputContainer}>
-                <View style={styles.inputIconContainer}>
-                  <UserIcon size={20} color="#9A9A9A" />
-                </View>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Username (optional)"
-                  placeholderTextColor="#666666"
-                  value={username}
-                  onChangeText={setUsername}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  testID="username-input"
-                />
-              </View>
+            <View style={styles.form}>
+              {mode === 'signup' && (
+                <>
+                  <View style={styles.inputContainer}>
+                    <View style={styles.inputIconContainer}>
+                      <UserIcon size={20} color="#9A9A9A" />
+                    </View>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Your name"
+                      placeholderTextColor="#666666"
+                      value={name}
+                      onChangeText={setName}
+                      autoCapitalize="words"
+                      autoCorrect={false}
+                      testID="name-input"
+                    />
+                  </View>
+
+                  <View style={styles.inputContainer}>
+                    <View style={styles.inputIconContainer}>
+                      <UserIcon size={20} color="#9A9A9A" />
+                    </View>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Username (optional)"
+                      placeholderTextColor="#666666"
+                      value={username}
+                      onChangeText={setUsername}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      testID="username-input"
+                    />
+                  </View>
+                </>
+              )}
 
               <View style={styles.inputContainer}>
                 <View style={styles.inputIconContainer}>
@@ -484,16 +540,43 @@ export default function SignUpScreen({ onClose, onSignUp }: SignUpScreenProps) {
                 />
               </View>
 
+              <View style={styles.inputContainer}>
+                <View style={styles.inputIconContainer}>
+                  <Lock size={20} color="#9A9A9A" />
+                </View>
+                <TextInput
+                  style={[styles.input, styles.passwordInput]}
+                  placeholder="Password"
+                  placeholderTextColor="#666666"
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry={!showPassword}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  testID="password-input"
+                />
+                <TouchableOpacity
+                  style={styles.eyeButton}
+                  onPress={() => setShowPassword(!showPassword)}
+                >
+                  {showPassword ? (
+                    <EyeOff size={20} color="#9A9A9A" />
+                  ) : (
+                    <Eye size={20} color="#9A9A9A" />
+                  )}
+                </TouchableOpacity>
+              </View>
+
               {error ? (
                 <Text style={styles.errorText}>{error}</Text>
               ) : null}
 
               <TouchableOpacity
                 style={[styles.signUpButton, isLoading && styles.signUpButtonDisabled]}
-                onPress={handleSignUp}
+                onPress={handleSubmit}
                 disabled={isLoading}
-                accessibilityLabel="Sign up"
-                testID="signup-button"
+                accessibilityLabel={mode === 'signup' ? 'Sign up' : 'Sign in'}
+                testID={mode === 'signup' ? 'signup-button' : 'signin-button'}
               >
                 <LinearGradient
                   colors={['#6C63FF', '#3DBEFF', '#00E6E6']}
@@ -502,7 +585,10 @@ export default function SignUpScreen({ onClose, onSignUp }: SignUpScreenProps) {
                   style={styles.signUpButtonGradient}
                 >
                   <Text style={styles.signUpButtonText}>
-                    {isLoading ? 'Signing Up...' : 'Sign Up & Continue'}
+                    {isLoading 
+                      ? (mode === 'signup' ? 'Signing Up...' : 'Signing In...')
+                      : (mode === 'signup' ? 'Sign Up & Continue' : 'Sign In')
+                    }
                   </Text>
                 </LinearGradient>
               </TouchableOpacity>
@@ -684,6 +770,41 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#FFFFFF',
     height: '100%',
+  },
+  passwordInput: {
+    paddingRight: 40,
+  },
+  eyeButton: {
+    position: 'absolute',
+    right: 16,
+    padding: 4,
+  },
+  modeToggle: {
+    flexDirection: 'row',
+    backgroundColor: '#1A1A1A',
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#2D2D2D',
+  },
+  modeButton: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  modeButtonActive: {
+    backgroundColor: '#2D2D2D',
+  },
+  modeButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#9A9A9A',
+  },
+  modeButtonTextActive: {
+    color: '#FFFFFF',
   },
   errorText: {
     color: '#FF6B6B',

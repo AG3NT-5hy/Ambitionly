@@ -10,6 +10,7 @@ import Purchases from 'react-native-purchases';
 import { supabase } from './supabase';
 import { trpc } from './trpc';
 import { collectGuestData, clearGuestData, backupGuestData } from './user-data-migration';
+import { STORAGE_KEYS } from '../constants';
 
 export type UserMode = 'guest' | 'registered';
 
@@ -102,6 +103,47 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
   const saveUser = async (updatedUser: UnifiedUser) => {
     setUserInternal(updatedUser);
     await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(updatedUser));
+  };
+
+  // Restore server data to local storage
+  const restoreServerDataToLocal = async (dbUser: any) => {
+    try {
+      console.log('[UnifiedUser] Restoring server data to local storage...');
+      
+      const restorePromises: Promise<void>[] = [];
+      
+      // Restore goal and roadmap data
+      if (dbUser.goal) {
+        restorePromises.push(AsyncStorage.setItem(STORAGE_KEYS.GOAL, dbUser.goal));
+      }
+      if (dbUser.timeline) {
+        restorePromises.push(AsyncStorage.setItem(STORAGE_KEYS.TIMELINE, dbUser.timeline));
+      }
+      if (dbUser.timeCommitment) {
+        restorePromises.push(AsyncStorage.setItem(STORAGE_KEYS.TIME_COMMITMENT, dbUser.timeCommitment));
+      }
+      if (dbUser.answers) {
+        restorePromises.push(AsyncStorage.setItem(STORAGE_KEYS.ANSWERS, dbUser.answers));
+      }
+      if (dbUser.roadmap) {
+        restorePromises.push(AsyncStorage.setItem(STORAGE_KEYS.ROADMAP, dbUser.roadmap));
+      }
+      if (dbUser.completedTasks) {
+        restorePromises.push(AsyncStorage.setItem(STORAGE_KEYS.COMPLETED_TASKS, dbUser.completedTasks));
+      }
+      if (dbUser.streakData) {
+        restorePromises.push(AsyncStorage.setItem(STORAGE_KEYS.STREAK_DATA, dbUser.streakData));
+      }
+      if (dbUser.taskTimers) {
+        restorePromises.push(AsyncStorage.setItem(STORAGE_KEYS.TASK_TIMERS, dbUser.taskTimers));
+      }
+      
+      await Promise.all(restorePromises);
+      console.log('[UnifiedUser] ✅ Server data restored to local storage');
+    } catch (error) {
+      console.error('[UnifiedUser] Error restoring server data:', error);
+      // Don't throw - continue with sign in even if restore fails
+    }
   };
 
   // Sign up: Convert guest to registered user
@@ -229,7 +271,10 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       
       const dbUser = result.user;
       
-      // 4. Create user object
+      // 4. Restore server data to local storage
+      await restoreServerDataToLocal(dbUser);
+      
+      // 5. Create user object
       const userData: UnifiedUser = {
         id: dbUser.id,
         email: dbUser.email,
@@ -245,10 +290,10 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         subscriptionPurchasedAt: dbUser.subscriptionPurchasedAt ? new Date(dbUser.subscriptionPurchasedAt) : null,
       };
       
-      // 5. Save to local storage
+      // 6. Save to local storage
       await saveUser(userData);
       
-      console.log('[UnifiedUser] ✅ Sign in complete');
+      console.log('[UnifiedUser] ✅ Sign in complete, server data restored to local storage');
       
       return { success: true, user: userData };
     } catch (error) {

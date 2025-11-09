@@ -6,6 +6,7 @@ import { useUi } from '@/providers/UiProvider';
 import { AppError } from '@/lib/errors';
 import { NotificationService } from '@/lib/notifications';
 import { analytics } from '@/lib/analytics';
+import { trpc } from '@/lib/trpc';
 
 export interface Task {
   id: string;
@@ -20,6 +21,7 @@ export interface TaskTimer {
   duration: number; // in minutes
   isActive: boolean;
   isCompleted: boolean;
+  notificationId?: string | null; // ID of scheduled notification
 }
 
 export interface Milestone {
@@ -73,6 +75,66 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
   const previousTimerStates = useRef<Map<string, boolean>>(new Map());
   const notificationSentRef = useRef<Set<string>>(new Set());
   const isGeneratingRoadmapRef = useRef(false);
+  const syncInProgressRef = useRef(false);
+  
+  // tRPC mutation for syncing data (must be at hook level)
+  const updateUserMutation = trpc.user.update.useMutation();
+  
+  // Get user info for syncing (we'll check if user is registered)
+  // Note: We can't use useUnifiedUser here directly due to hook rules, so we'll check via Supabase session
+  const checkUserSession = async (): Promise<{ email: string | null; isRegistered: boolean }> => {
+    try {
+      const { supabase } = await import('@/lib/supabase');
+      const { data: { session } } = await supabase.auth.getSession();
+      return {
+        email: session?.user?.email || null,
+        isRegistered: !!session?.user,
+      };
+    } catch (error) {
+      return { email: null, isRegistered: false };
+    }
+  };
+  
+  // Sync ambition data to database
+  const syncAmbitionDataToDatabase = useCallback(async () => {
+    // Prevent concurrent syncs
+    if (syncInProgressRef.current) {
+      console.log('[Ambition] Sync already in progress, skipping');
+      return;
+    }
+    
+    try {
+      const userSession = await checkUserSession();
+      
+      if (!userSession.isRegistered || !userSession.email) {
+        console.log('[Ambition] User not registered, skipping sync');
+        return;
+      }
+      
+      syncInProgressRef.current = true;
+      console.log('[Ambition] Syncing data to database...');
+      
+      // Use mutateAsync for proper async handling
+      await updateUserMutation.mutateAsync({
+        email: userSession.email,
+        goal: goal || null,
+        timeline: timeline || null,
+        timeCommitment: timeCommitment || null,
+        answers: answers.length > 0 ? JSON.stringify(answers) : null,
+        roadmap: roadmap ? JSON.stringify(roadmap) : null,
+        completedTasks: completedTasks.length > 0 ? JSON.stringify(completedTasks) : null,
+        streakData: streakData.streak > 0 ? JSON.stringify(streakData) : null,
+        taskTimers: taskTimers.length > 0 ? JSON.stringify(taskTimers) : null,
+      });
+      
+      console.log('[Ambition] ✅ Data synced to database successfully');
+    } catch (error) {
+      console.error('[Ambition] Error syncing data to database:', error);
+      // Don't throw - sync failures shouldn't break the app
+    } finally {
+      syncInProgressRef.current = false;
+    }
+  }, [goal, timeline, timeCommitment, answers, roadmap, completedTasks, streakData, taskTimers, updateUserMutation]);
 
   // Load data from storage on init
   useEffect(() => {
@@ -198,7 +260,9 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     };
   }, [isHydrated]);
 
-  // Monitor timer completion and send notifications
+  // Monitor timer completion and send notifications (fallback for foreground only)
+  // Note: Primary notifications are scheduled when timers start and work in background
+  // This is only a fallback in case scheduled notifications fail
   useEffect(() => {
     if (!isHydrated || !roadmap) return;
 
@@ -210,9 +274,15 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         const isNowComplete = isTaskTimerComplete(timer.taskId);
         const notificationKey = `${timer.taskId}-${timer.startTime}`;
 
-        // If timer just completed and we haven't sent a notification for this timer instance
-        if (!wasComplete && isNowComplete && !notificationSentRef.current.has(notificationKey)) {
-          console.log(`[Notifications] Timer completed for task ${timer.taskId}`);
+        // Only send fallback notification if:
+        // 1. Timer just completed
+        // 2. We haven't sent a notification for this timer instance
+        // 3. No notification was scheduled (notificationId is null/undefined)
+        // This prevents duplicate notifications when scheduled notifications work
+        if (!wasComplete && isNowComplete && 
+            !notificationSentRef.current.has(notificationKey) &&
+            !timer.notificationId) {
+          console.log(`[Notifications] Timer completed for task ${timer.taskId} - sending fallback notification (scheduled notification may have failed)`);
           
           // Find the task title for the notification
           let taskTitle = 'Task';
@@ -229,13 +299,13 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
             }
           }
 
-          // Send notification
+          // Send immediate notification as fallback
           NotificationService.scheduleTaskCompleteNotification(taskTitle);
           
           // Mark notification as sent for this timer instance
           notificationSentRef.current.add(notificationKey);
           
-          console.log(`[Notifications] Notification sent for completed task: ${taskTitle}`);
+          console.log(`[Notifications] Fallback notification sent for completed task: ${taskTitle}`);
         }
 
         // Update previous state
@@ -246,7 +316,7 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     // Check immediately
     checkTimerCompletion();
 
-    // Set up interval to check every second
+    // Set up interval to check every second (only for fallback)
     const interval = setInterval(checkTimerCompletion, 1000);
 
     return () => {
@@ -269,6 +339,8 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     }
     setGoalState(sanitized);
     await AsyncStorage.setItem(STORAGE_KEYS.GOAL, sanitized);
+    // Sync to database
+    await syncAmbitionDataToDatabase();
   };
 
   const setTimeline = async (newTimeline: string) => {
@@ -299,6 +371,8 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     }
     setTimeCommitmentState(sanitized);
     await AsyncStorage.setItem(STORAGE_KEYS.TIME_COMMITMENT, sanitized);
+    // Sync to database
+    await syncAmbitionDataToDatabase();
   };
 
   const addAnswer = async (answer: string) => {
@@ -315,6 +389,8 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     const newAnswers = [...answers, sanitized];
     setAnswersState(newAnswers);
     await AsyncStorage.setItem(STORAGE_KEYS.ANSWERS, JSON.stringify(newAnswers));
+    // Sync to database
+    await syncAmbitionDataToDatabase();
   };
 
   const inferIndustry = (g: string, contextAnswers: string[]): string => {
@@ -530,6 +606,9 @@ Output ONLY valid JSON in this exact format:
       
       console.log('Roadmap generated successfully');
       analytics.trackRoadmapGenerated(sanitizedGoal, sanitizedTimeline, sanitizedTimeCommitment);
+      
+      // Sync to database
+      await syncAmbitionDataToDatabase();
     } catch (error) {
       console.error('Error generating roadmap:', error);
       const msg = error instanceof AppError ? error.message : (error as Error)?.message ?? 'Unexpected error';
@@ -567,6 +646,9 @@ Output ONLY valid JSON in this exact format:
       console.log('[Ambition] Clearing existing timers for new roadmap (fallback)');
       setTaskTimersState([]);
       await AsyncStorage.removeItem(STORAGE_KEYS.TASK_TIMERS);
+      
+      // Sync to database
+      await syncAmbitionDataToDatabase();
     } finally {
       isGeneratingRoadmapRef.current = false;
     }
@@ -772,15 +854,40 @@ Output ONLY valid JSON in this exact format:
     
     // Create new timer without affecting existing ones
     const duration = parseTimeToMinutes(estimatedTime);
+    
+    // Find the task title for the notification
+    let taskTitle = 'Task';
+    if (roadmap?.phases) {
+      for (const phase of roadmap.phases) {
+        for (const milestone of phase.milestones) {
+          const task = milestone.tasks.find(t => t.id === taskId);
+          if (task) {
+            taskTitle = task.title;
+            break;
+          }
+        }
+        if (taskTitle !== 'Task') break;
+      }
+    }
+
+    // Schedule notification for when timer completes (in seconds)
+    const durationInSeconds = duration * 60;
+    const notificationId = await NotificationService.scheduleTaskCompleteNotification(
+      taskTitle,
+      durationInSeconds
+    );
+
     const newTimer: TaskTimer = {
       taskId,
       startTime: Date.now(),
       duration,
       isActive: true,
       isCompleted: false,
+      notificationId: notificationId || null,
     };
     
     console.log(`[Timer] Created new timer:`, newTimer);
+    console.log(`[Timer] Scheduled notification for ${duration} minutes (${durationInSeconds} seconds)`);
 
     // Add new timer while preserving all existing timers
     const updatedTimers = [...taskTimers.filter(t => t.taskId !== taskId), newTimer];
@@ -790,15 +897,25 @@ Output ONLY valid JSON in this exact format:
     console.log(`[Timer] Timer started successfully for task ${taskId}`);
     console.log(`[Timer] All timers after start:`, updatedTimers.filter(t => t.isActive).map(t => t.taskId));
     analytics.track('task_started', { task_id: taskId, duration_minutes: duration });
+    
+    // Sync to database
+    await syncAmbitionDataToDatabase();
   };
 
   const stopTaskTimer = async (taskId: string) => {
     console.log(`[Timer] Stopping timer for task ${taskId}`);
     
+    // Find the timer to cancel its notification
+    const timerToStop = taskTimers.find(timer => timer.taskId === taskId && timer.isActive);
+    if (timerToStop?.notificationId) {
+      console.log(`[Timer] Cancelling notification ${timerToStop.notificationId} for task ${taskId}`);
+      await NotificationService.cancelNotification(timerToStop.notificationId);
+    }
+    
     const updatedTimers = taskTimers.map(timer => {
       if (timer.taskId === taskId && timer.isActive) {
         console.log(`[Timer] Stopping timer for task ${timer.taskId}`);
-        return { ...timer, isActive: false };
+        return { ...timer, isActive: false, notificationId: null };
       }
       return timer;
     });
@@ -807,6 +924,9 @@ Output ONLY valid JSON in this exact format:
     await AsyncStorage.setItem(STORAGE_KEYS.TASK_TIMERS, JSON.stringify(updatedTimers));
     
     console.log(`[Timer] Timer stopped successfully for task ${taskId}`);
+    
+    // Sync to database
+    await syncAmbitionDataToDatabase();
   };
 
   const getTaskTimer = (taskId: string): TaskTimer | null => {
@@ -861,8 +981,14 @@ Output ONLY valid JSON in this exact format:
 
     // Mark timer as completed if it exists
     if (timer && !completedTasks.includes(taskId)) {
+      // Cancel the scheduled notification since task is being manually completed
+      if (timer.notificationId) {
+        console.log(`[Timer] Cancelling notification ${timer.notificationId} for manually completed task ${taskId}`);
+        await NotificationService.cancelNotification(timer.notificationId);
+      }
+      
       const updatedTimers = taskTimers.map(t => 
-        t.taskId === taskId ? { ...t, isCompleted: true, isActive: false } : t
+        t.taskId === taskId ? { ...t, isCompleted: true, isActive: false, notificationId: null } : t
       );
       setTaskTimersState(updatedTimers);
       await AsyncStorage.setItem(STORAGE_KEYS.TASK_TIMERS, JSON.stringify(updatedTimers));
@@ -873,6 +999,9 @@ Output ONLY valid JSON in this exact format:
       await updateStreak();
       analytics.trackTaskCompleted(taskId, timer ? Date.now() - timer.startTime : 0);
     }
+    
+    // Sync to database
+    await syncAmbitionDataToDatabase();
     
     return true; // Return true to indicate toggle was successful
   };
@@ -904,6 +1033,9 @@ Output ONLY valid JSON in this exact format:
     if (newStreak > 1) {
       analytics.trackStreakAchieved(newStreak);
     }
+    
+    // Sync to database
+    await syncAmbitionDataToDatabase();
   };
 
   const getProgress = () => {

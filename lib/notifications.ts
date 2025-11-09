@@ -88,41 +88,62 @@ export class NotificationService {
     }
   }
 
-  static async scheduleTaskCompleteNotification(taskTitle: string): Promise<void> {
+  static async scheduleTaskCompleteNotification(
+    taskTitle: string,
+    triggerInSeconds?: number
+  ): Promise<string | null> {
     try {
       if (Platform.OS === 'web') {
         // Fallback for web - show browser notification if supported
         if ('Notification' in window && Notification.permission === 'granted') {
-          new Notification('Task Timer Complete! ⏰', {
-            body: `"${taskTitle}" timer is finished. Time to move on to the next task!`,
-            icon: '/favicon.png',
-            tag: 'task-complete',
-          });
+          if (triggerInSeconds && triggerInSeconds > 0) {
+            // Schedule for future
+            setTimeout(() => {
+              new Notification('Task Timer Complete! ⏰', {
+                body: `"${taskTitle}" timer is finished. Time to move on to the next task!`,
+                icon: '/favicon.png',
+                tag: 'task-complete',
+              });
+            }, triggerInSeconds * 1000);
+          } else {
+            // Show immediately
+            new Notification('Task Timer Complete! ⏰', {
+              body: `"${taskTitle}" timer is finished. Time to move on to the next task!`,
+              icon: '/favicon.png',
+              tag: 'task-complete',
+            });
+          }
         } else {
           console.log('[Notifications] Web notifications not available or not permitted');
         }
-        return;
+        return null;
       }
 
       if (isExpoGo) {
         console.log('[Notifications] Expo Go detected - notification scheduling disabled');
-        return;
+        return null;
       }
 
       if (!this.hasPermission) {
         console.log('[Notifications] No permission to send notifications');
-        return;
+        return null;
       }
 
       // Android-specific notification handling
       if (Platform.OS === 'android') {
         try {
-          // Ensure notification channel exists before scheduling
+          // Ensure notification channel exists with HIGH importance for better reliability
           const channels = await Notifications.getNotificationChannelsAsync();
-          if (!channels.find(channel => channel.id === 'default')) {
-            await Notifications.setNotificationChannelAsync('default', {
-              name: 'Default',
-              importance: Notifications.AndroidImportance.DEFAULT,
+          const defaultChannel = channels.find(channel => channel.id === 'task-timers');
+          if (!defaultChannel) {
+            await Notifications.setNotificationChannelAsync('task-timers', {
+              name: 'Task Timers',
+              importance: Notifications.AndroidImportance.HIGH,
+              vibrationPattern: [0, 250, 250, 250],
+              lightColor: '#FF231F7C',
+              sound: 'default',
+              enableVibrate: true,
+              showBadge: false,
             });
           }
         } catch (channelError) {
@@ -130,19 +151,82 @@ export class NotificationService {
         }
       }
 
-      await Notifications.scheduleNotificationAsync({
+      // Determine trigger - if triggerInSeconds is provided, schedule for future
+      let trigger: Notifications.NotificationTriggerInput | null = null;
+      if (triggerInSeconds && triggerInSeconds > 0) {
+        // Use exact date/time for better reliability
+        const triggerDate = new Date(Date.now() + triggerInSeconds * 1000);
+        trigger = {
+          date: triggerDate,
+        };
+        console.log(`[Notifications] Scheduling notification for ${triggerInSeconds} seconds (${triggerDate.toISOString()})`);
+      }
+
+      const notificationIdentifier = `task-timer-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      const notificationId = await Notifications.scheduleNotificationAsync({
         content: {
           title: 'Task Timer Complete! ⏰',
           body: `"${taskTitle}" timer is finished. Time to move on to the next task!`,
           sound: 'default',
           priority: Notifications.AndroidNotificationPriority.HIGH,
+          data: {
+            type: 'task-timer-complete',
+            taskTitle,
+          },
+          ...(Platform.OS === 'android' && { channelId: 'task-timers' }),
         },
-        trigger: null, // Show immediately
+        trigger: trigger, // null for immediate, or date for scheduled
+        identifier: notificationIdentifier,
       });
 
-      console.log('[Notifications] Task complete notification sent');
+      if (trigger) {
+        console.log(`[Notifications] Task complete notification scheduled successfully. ID: ${notificationId}, Identifier: ${notificationIdentifier}, Trigger: ${triggerInSeconds} seconds`);
+      } else {
+        console.log(`[Notifications] Task complete notification sent immediately. ID: ${notificationId}`);
+      }
+      
+      return notificationId;
     } catch (error) {
       console.error('[Notifications] Error sending notification:', error);
+      return null;
+    }
+  }
+
+  static async cancelNotification(notificationId: string): Promise<void> {
+    try {
+      if (Platform.OS === 'web' || isExpoGo) {
+        return;
+      }
+
+      await Notifications.cancelScheduledNotificationAsync(notificationId);
+      console.log(`[Notifications] Cancelled notification: ${notificationId}`);
+    } catch (error) {
+      console.error('[Notifications] Error cancelling notification:', error);
+    }
+  }
+
+  static async cancelAllTaskTimerNotifications(): Promise<void> {
+    try {
+      if (Platform.OS === 'web' || isExpoGo) {
+        return;
+      }
+
+      const allNotifications = await Notifications.getAllScheduledNotificationsAsync();
+      const taskTimerNotifications = allNotifications.filter(
+        (notification) => notification.identifier?.startsWith('task-timer-') ||
+                         notification.content?.data?.type === 'task-timer-complete'
+      );
+
+      for (const notification of taskTimerNotifications) {
+        if (notification.identifier) {
+          await Notifications.cancelScheduledNotificationAsync(notification.identifier);
+        }
+      }
+
+      console.log(`[Notifications] Cancelled ${taskTimerNotifications.length} task timer notifications`);
+    } catch (error) {
+      console.error('[Notifications] Error cancelling task timer notifications:', error);
     }
   }
 

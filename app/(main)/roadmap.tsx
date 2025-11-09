@@ -5,7 +5,7 @@ import { Target, Flame, ChevronRight, Play, Clock, Lock } from 'lucide-react-nat
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAmbition, type Task } from '@/hooks/ambition-store';
 import { useSubscription } from '@/hooks/subscription-store';
-import { useUser } from '@/hooks/user-store';
+import { useUnifiedUser } from '@/lib/unified-user-store';
 import { useUi } from '@/providers/UiProvider';
 import { SkeletonBlock } from '@/components/Skeleton';
 import { router } from 'expo-router';
@@ -41,7 +41,7 @@ export default function RoadmapScreen() {
     });
   }, [roadmap]);
   const { shouldShowPaywall } = useSubscription();
-  const { isSignedUp, signUp } = useUser();
+  const { isRegistered, signUp, signIn } = useUnifiedUser();
   const { showToast } = useUi();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
@@ -50,6 +50,7 @@ export default function RoadmapScreen() {
   const [showPaywallModal, setShowPaywallModal] = useState<boolean>(false);
   const [paywallDismissed, setPaywallDismissed] = useState<boolean>(false);
   const [showSignUpModal, setShowSignUpModal] = useState<boolean>(false);
+  const shouldShowSignUp = !isRegistered;
   const [hasCheckedSignUp, setHasCheckedSignUp] = useState<boolean>(false);
   
   // Track the current task to prevent unexpected changes
@@ -88,11 +89,11 @@ export default function RoadmapScreen() {
   useEffect(() => {
     if (!hasCheckedSignUp && roadmap) {
       setHasCheckedSignUp(true);
-      if (!isSignedUp()) {
+      if (!isRegistered) {
         setShowSignUpModal(true);
       }
     }
-  }, [hasCheckedSignUp, roadmap, isSignedUp]);
+  }, [hasCheckedSignUp, roadmap, isRegistered]);
 
   // Show paywall when triggered
   useEffect(() => {
@@ -516,9 +517,9 @@ export default function RoadmapScreen() {
           onClose={() => {
             setShowSignUpModal(false);
           }}
-          onSignUp={async (email: string, name: string) => {
+          onSignUp={async (email: string, password: string, name: string) => {
             try {
-              await signUp(email, name);
+              await signUp(email, password, name);
               setShowSignUpModal(false);
               showToast('Welcome! Your progress is now saved.', 'success');
               
@@ -530,6 +531,16 @@ export default function RoadmapScreen() {
               }
             } catch (error) {
               showToast(error instanceof Error ? error.message : 'Sign up failed', 'error');
+              throw error;
+            }
+          }}
+          onSignIn={async (email: string, password: string) => {
+            try {
+              await signIn(email, password);
+              setShowSignUpModal(false);
+              showToast('Welcome back! Your data has been synced.', 'success');
+            } catch (error) {
+              showToast(error instanceof Error ? error.message : 'Sign in failed', 'error');
               throw error;
             }
           }}
