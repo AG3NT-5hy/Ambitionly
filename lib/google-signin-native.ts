@@ -6,6 +6,7 @@
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { supabase } from './supabase';
 import { Platform } from 'react-native';
+import type { User } from '@supabase/supabase-js';
 
 // IMPORTANT: Replace this with your WEB Client ID from Google Cloud Console
 // NOT the Android Client ID - use the Web Client ID!
@@ -34,6 +35,7 @@ export function configureGoogleSignIn() {
  */
 export async function signInWithGoogleNative(): Promise<{
   success: boolean;
+  user?: User;
   error?: Error;
 }> {
   try {
@@ -43,7 +45,7 @@ export async function signInWithGoogleNative(): Promise<{
     }
 
     // Show native Google Sign-In picker
-    await GoogleSignin.signIn();
+    const account = await GoogleSignin.signIn();
     
     // Get the ID token
     const tokens = await GoogleSignin.getTokens();
@@ -58,15 +60,33 @@ export async function signInWithGoogleNative(): Promise<{
     const { data, error } = await supabase.auth.signInWithIdToken({
       provider: 'google',
       token: tokens.idToken,
+      access_token: tokens.accessToken,
     });
 
     if (error) {
       throw error;
     }
 
-    console.log('✅ Signed in with Supabase:', data.user?.email);
+    let user: User | undefined = data?.user ?? data?.session?.user ?? undefined;
 
-    return { success: true };
+    if (!user) {
+      // Fallback: fetch session and user explicitly (handles race conditions)
+      const { data: sessionData } = await supabase.auth.getSession();
+      user = sessionData.session?.user ?? undefined;
+
+      if (!user) {
+        const { data: userData } = await supabase.auth.getUser();
+        user = userData?.user ?? undefined;
+      }
+    }
+
+    if (user) {
+      console.log('✅ Signed in with Supabase:', user.email ?? account?.user?.email ?? 'unknown email');
+    } else {
+      console.warn('⚠️ Supabase sign-in succeeded but user data is missing');
+    }
+
+    return { success: true, user };
   } catch (error: any) {
     console.error('❌ Google Sign-In error:', error);
     

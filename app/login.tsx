@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Image, Animated, Platform, Al
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Apple, Chrome, ArrowRight } from 'lucide-react-native';
+import { Apple, ArrowRight } from 'lucide-react-native';
 import { signInWithApple } from '../lib/supabase';
 import { signInWithGoogleNative } from '../lib/google-signin-native';
 
@@ -160,19 +160,33 @@ export default function LoginScreen() {
             <View style={styles.buttonContainer}>
               {/* Google Login Button */}
               <TouchableOpacity
-                style={styles.loginButton}
+                style={styles.googleButton}
                 onPress={handleGoogleLogin}
                 disabled={isLoading}
                 activeOpacity={0.8}
               >
-                <LinearGradient
-                  colors={['#1A1A1A', '#2D2D2D']}
-                  style={styles.buttonGradient}
-                >
-                  <Chrome size={20} color="#FFFFFF" />
-                  <Text style={styles.buttonText}>Continue with Google</Text>
-                  <ArrowRight size={16} color="#9A9A9A" />
-                </LinearGradient>
+                {/* Google G Logo */}
+                <View style={styles.googleLogoContainer}>
+                  <View style={styles.googleLogo}>
+                    {/* Blue left vertical stroke - forms the left side of G */}
+                    <View style={styles.googleBlueSection}>
+                      <View style={styles.googleBlueBar} />
+                    </View>
+                    {/* Red top arc - forms the top-left curve of G */}
+                    <View style={styles.googleRedSection}>
+                      <View style={styles.googleRedArc} />
+                    </View>
+                    {/* Yellow right arc - forms the right curve of G */}
+                    <View style={styles.googleYellowSection}>
+                      <View style={styles.googleYellowArc} />
+                    </View>
+                    {/* Green bottom arc - forms the bottom curve of G */}
+                    <View style={styles.googleGreenSection}>
+                      <View style={styles.googleGreenArc} />
+                    </View>
+                  </View>
+                </View>
+                <Text style={styles.googleButtonText}>Continue with Google</Text>
               </TouchableOpacity>
 
               {/* Apple Login Button - Only show on iOS */}
@@ -316,6 +330,93 @@ const styles = StyleSheet.create({
   buttonContainer: {
     width: '100%',
     gap: 16,
+  },
+  googleButton: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    minHeight: 56,
+  },
+  googleLogoContainer: {
+    width: 20,
+    height: 20,
+    marginRight: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  googleLogo: {
+    width: 20,
+    height: 20,
+    position: 'relative',
+  },
+  googleBlueSection: {
+    position: 'absolute',
+    left: 0,
+    top: 3,
+    width: 5.5,
+    height: 14,
+  },
+  googleBlueBar: {
+    width: 5.5,
+    height: 14,
+    backgroundColor: '#4285F4',
+    borderTopLeftRadius: 10,
+    borderBottomLeftRadius: 10,
+  },
+  googleRedSection: {
+    position: 'absolute',
+    left: 3,
+    top: 0,
+    width: 11,
+    height: 11,
+    overflow: 'hidden',
+  },
+  googleRedArc: {
+    width: 11,
+    height: 11,
+    backgroundColor: '#EA4335',
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+  },
+  googleYellowSection: {
+    position: 'absolute',
+    right: 0,
+    top: 3,
+    width: 9,
+    height: 9,
+  },
+  googleYellowArc: {
+    width: 9,
+    height: 9,
+    backgroundColor: '#FBBC05',
+    borderRadius: 9,
+  },
+  googleGreenSection: {
+    position: 'absolute',
+    left: 3,
+    bottom: 0,
+    width: 11,
+    height: 9,
+    overflow: 'hidden',
+  },
+  googleGreenArc: {
+    width: 11,
+    height: 9,
+    backgroundColor: '#34A853',
+    borderBottomLeftRadius: 10,
+    borderBottomRightRadius: 10,
+  },
+  googleButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#000000',
+    fontFamily: 'System',
   },
   loginButton: {
     borderRadius: 16,

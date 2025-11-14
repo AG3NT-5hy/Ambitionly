@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { User, Bell, Palette, Info, RefreshCw, Trash2, Code, ChevronRight, Crown, LogOut, X, Calendar, CreditCard } from 'lucide-react-native';
 import { useAmbition } from '../../hooks/ambition-store'
 import { useSubscription } from '../../hooks/subscription-store'
-import { useUser } from '../../hooks/user-store'
+import { useUnifiedUser } from '../../lib/unified-user-store'
 import { router } from 'expo-router';
 import { useUi } from '../../providers/UiProvider'
 import PaywallScreen from '../../components/PaywallScreen'
@@ -13,7 +13,7 @@ import PaywallScreen from '../../components/PaywallScreen'
 export default function SettingsScreen() {
   const { clearAllData, resetProgress } = useAmbition();
   const { subscriptionState, isSubscriptionActive, cancelSubscription, restoreSubscription } = useSubscription();
-  const { user, signOut } = useUser();
+  const { user, isGuest, signOut: unifiedSignOut } = useUnifiedUser();
   const { showToast } = useUi();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
@@ -142,6 +142,11 @@ export default function SettingsScreen() {
     return 'Active';
   };
 
+  const accountTitle = isGuest ? 'Account' : (user?.name || 'Account');
+  const accountSubtitle = isGuest
+    ? 'Sign in or create an account to sync progress'
+    : (user?.email || 'Tap to manage your profile');
+
   const SettingItem = ({ 
     icon, 
     title, 
@@ -229,14 +234,18 @@ export default function SettingsScreen() {
               <View style={styles.sectionCard}>
                 <SettingItem
                   icon={<User size={20} color="#00E6E6" />}
-                  title="Account"
-                  subtitle="Manage your account settings"
+                  title={accountTitle}
+                  subtitle={accountSubtitle}
                   onPress={() => {
-                    router.push('/(main)/account');
+                    if (isGuest) {
+                      router.push('/login');
+                    } else {
+                      router.push('/(main)/account');
+                    }
                   }}
                   showChevron
                 />
-                {user && (
+                {!isGuest && user && (
                   <SettingItem
                     icon={<LogOut size={20} color="#FF6B6B" />}
                     title="Sign Out"
@@ -252,7 +261,7 @@ export default function SettingsScreen() {
                             style: 'destructive',
                             onPress: async () => {
                               try {
-                                await signOut();
+                                await unifiedSignOut();
                                 showToast('Signed out successfully', 'success');
                                 router.replace('/welcome');
                               } catch {
@@ -384,6 +393,10 @@ export default function SettingsScreen() {
           onSubscribe={() => {
             setShowPaywallModal(false);
             showToast('Welcome to Ambitionly Pro! 🚀', 'success');
+          }}
+          onShowSignUp={() => {
+            setShowPaywallModal(false);
+            router.push('/login');
           }}
         />
       </Modal>

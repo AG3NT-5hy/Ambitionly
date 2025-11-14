@@ -125,13 +125,32 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         throw (result.error || new Error('Google sign-in failed. Please try again.'));
       }
 
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError) {
-        console.error('[UnifiedUser] Failed to retrieve Supabase session after Google sign-in:', sessionError);
-        throw new Error('Failed to complete Google sign-in. Please try again.');
+      let authUser = result.user as SupabaseUser | undefined;
+
+      if (!authUser) {
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) {
+          console.error('[UnifiedUser] Failed to retrieve Supabase session after Google sign-in:', sessionError);
+        }
+        authUser = sessionData.session?.user as SupabaseUser | undefined;
       }
 
-      const authUser = sessionData.session?.user as SupabaseUser | undefined;
+      if (!authUser) {
+        const { data: userData, error: userError } = await supabase.auth.getUser();
+        if (userError) {
+          console.error('[UnifiedUser] Failed to fetch Supabase user after Google sign-in:', userError);
+        }
+        authUser = userData?.user as SupabaseUser | undefined;
+      }
+
+      if (!authUser) {
+        // Wait briefly and retry once to handle potential race conditions
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        const { data: retrySession } = await supabase.auth.getSession();
+        authUser = retrySession.session?.user as SupabaseUser | undefined;
+      }
+
       if (!authUser) {
         throw new Error('Google sign-in did not return a user account. Please try again.');
       }
@@ -445,6 +464,9 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
             errorMessage.includes('Cannot connect to server') ||
             errorMessage.includes('already read') || // Response body already read error
             errorMessage.includes('body stream already read');
+        const isTransformError = errorMessage.includes('Unable to transform response') ||
+          errorMessage.includes('Invalid input: expected object') ||
+          errorMessage.includes('Transformation error (deserialize)');
         
         // If it's a network error, we'll fall back to Supabase signup
         // If it's "user already exists", we'll try to sign in with Supabase
@@ -472,13 +494,13 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         
         // If it's not a network error and not "user already exists", throw the error
         // Network errors will fall through to Supabase signup below
-        if (!isNetworkError && !supabaseUserId) {
-          console.error('[UnifiedUser] Backend signup error (not network):', backendError);
+        if (!isNetworkError && !isTransformError && !supabaseUserId) {
+          console.error('[UnifiedUser] Backend signup error (not network/transform):', backendError);
           throw backendError;
         }
         
-        // If we get here with a network error, we'll fall back to Supabase signup
-        console.log('[UnifiedUser] Backend unavailable, falling back to Supabase signup');
+        // If we get here with a network/transform error, we'll fall back to Supabase signup
+        console.log('[UnifiedUser] Backend unavailable or returned invalid response, falling back to Supabase signup');
       }
       
       // 2. If backend didn't create Supabase user, try to create with auto-confirmation via backend endpoint
@@ -500,6 +522,13 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
           }
         } catch (confirmError: any) {
           console.warn('[UnifiedUser] Backend confirm endpoint failed, falling back to direct Supabase signup:', confirmError);
+          const confirmMessage = confirmError?.message || String(confirmError);
+          const isTransformError = confirmMessage.includes('Unable to transform response') ||
+            confirmMessage.includes('Invalid input: expected object') ||
+            confirmMessage.includes('Transformation error (deserialize)');
+          if (isTransformError) {
+            console.warn('[UnifiedUser] Backend confirm endpoint returned an unexpected transform error. Falling back to direct Supabase signup.');
+          }
           
           // Fallback: Create user directly with Supabase (will require email verification)
           // This should rarely happen if backend is available

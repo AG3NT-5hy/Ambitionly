@@ -449,6 +449,10 @@ export default function PhasesScreen() {
             setShowPaywallModal(false);
             showToast('Welcome to Ambitionly Pro! 🚀', 'success');
           }}
+          onShowSignUp={() => {
+            setShowPaywallModal(false);
+            router.push('/login');
+          }}
         />
       </Modal>
     </>

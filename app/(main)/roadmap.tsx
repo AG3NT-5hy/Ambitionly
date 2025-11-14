@@ -556,6 +556,10 @@ export default function RoadmapScreen() {
             setPaywallDismissed(false);
             showToast('Welcome to Ambitionly Pro! 🚀', 'success');
           }}
+          onShowSignUp={() => {
+            setShowPaywallModal(false);
+            setShowSignUpModal(true);
+          }}
         />
       </Modal>
 

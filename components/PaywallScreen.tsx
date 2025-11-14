@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Animated, useWindowDimensions, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Animated, useWindowDimensions, Platform, Alert } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -7,6 +7,8 @@ import { X, Zap, Check, Sparkles, Target, TrendingUp, Users, Award, ArrowRight, 
 import { useSubscription, type SubscriptionPlan } from '../hooks/subscription-store';
 import { useUi } from '../providers/UiProvider';
 import { analytics } from '../lib/analytics';
+import { useUnifiedUser } from '../lib/unified-user-store';
+import { router } from 'expo-router';
 import Purchases from 'react-native-purchases';
 
 interface TrailSegment {
@@ -29,12 +31,14 @@ interface ShootingStar {
 interface PaywallScreenProps {
   onClose: () => void;
   onSubscribe: () => void;
+  onShowSignUp?: () => void; // Optional callback to show sign up screen
 }
 
-export default function PaywallScreen({ onClose, onSubscribe }: PaywallScreenProps) {
+export default function PaywallScreen({ onClose, onSubscribe, onShowSignUp }: PaywallScreenProps) {
   const { width, height } = useWindowDimensions();
   const { purchaseSubscription, restoreSubscription, getAnnualSavings, syncRevenueCatStatus } = useSubscription();
   const { showToast } = useUi();
+  const { isRegistered } = useUnifiedUser();
   const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan>('annual');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [purchaseCompleted, setPurchaseCompleted] = useState<boolean>(false);
@@ -510,6 +514,35 @@ export default function PaywallScreen({ onClose, onSubscribe }: PaywallScreenPro
   const handlePurchase = async () => {
     if (isLoading || !selectedPlan) return;
     
+    // Check if user is registered before allowing purchase
+    if (!isRegistered) {
+      Alert.alert(
+        'Sign Up Required',
+        'You need to create an account to subscribe to premium. This ensures we can save your subscription and sync it across your devices.',
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+          {
+            text: 'Sign Up',
+            onPress: () => {
+              if (onShowSignUp) {
+                onShowSignUp();
+                onClose(); // Close paywall to show sign up
+              } else {
+                // Fallback: navigate to login/signup
+                onClose();
+                router.push('/login');
+              }
+            },
+          },
+        ],
+        { cancelable: true }
+      );
+      return;
+    }
+    
     setIsLoading(true);
     analytics.track('purchase_started', { plan: selectedPlan });
 
@@ -563,6 +596,35 @@ export default function PaywallScreen({ onClose, onSubscribe }: PaywallScreenPro
   // RevenueCat purchase handling
   const handleRevenueCatPurchase = async (pkg: any) => {
     if (isLoading) return;
+    
+    // Check if user is registered before allowing purchase
+    if (!isRegistered) {
+      Alert.alert(
+        'Sign Up Required',
+        'You need to create an account to subscribe to premium. This ensures we can save your subscription and sync it across your devices.',
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+          {
+            text: 'Sign Up',
+            onPress: () => {
+              if (onShowSignUp) {
+                onShowSignUp();
+                onClose(); // Close paywall to show sign up
+              } else {
+                // Fallback: navigate to login/signup
+                onClose();
+                router.push('/login');
+              }
+            },
+          },
+        ],
+        { cancelable: true }
+      );
+      return;
+    }
     
     setIsLoading(true);
     analytics.track('purchase_started', { productId: pkg.identifier });

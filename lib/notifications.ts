@@ -25,45 +25,10 @@ if (!isExpoGo) {
 // Minimum time in the future for scheduling notifications (5 seconds)
 const MINIMUM_FUTURE_TIME_MS = 5000;
 
-// Cache for app icon URI
-let appIconUri: string | null = null;
-
-/**
- * Get the app icon URI for use in notifications
- * On Android, this returns a local file URI that can be used in the icon property
- * On iOS, the app icon appears automatically, but we can also use attachments
- */
-async function getAppIconUri(): Promise<string | null> {
-  if (appIconUri) {
-    return appIconUri;
-  }
-
-  try {
-    // Try to use expo-asset if available
-    let Asset;
-    try {
-      Asset = require('expo-asset').Asset;
-    } catch {
-      // expo-asset not available, will use app icon automatically
-      return null;
-    }
-
-    // Load the app icon asset
-    const iconAsset = require('../assets/images/icon.png');
-    const asset = Asset.fromModule(iconAsset);
-    await asset.downloadAsync();
-    
-    if (asset.localUri) {
-      appIconUri = asset.localUri;
-      return appIconUri;
-    }
-  } catch (error) {
-    console.warn('[Notifications] Failed to load app icon for notifications:', error);
-    // App icon will be used automatically by the system
-  }
-
-  return null;
-}
+// Note: App icons for notifications are configured in app.json
+// Android: Uses app launcher icon automatically from app.json "icon" and android.adaptiveIcon
+// iOS: Uses app icon automatically from app bundle
+// No custom icon loading needed - Expo handles this automatically
 
 export class NotificationService {
   private static hasPermission = false;
@@ -224,10 +189,9 @@ export class NotificationService {
       
       // Schedule the notification
       try {
-        // Get app icon URI for notification
-        const iconUri = await getAppIconUri();
-        
-        // Build notification content with icon
+        // Build notification content
+        // Android: App icon is used automatically from app.json/AndroidManifest
+        // iOS: App icon appears automatically from app bundle
         const notificationContent: Notifications.NotificationContentInput = {
           title: 'Task Timer Complete! ⏰',
           body: `"${taskTitle}" timer is finished. Time to move on to the next task!`,
@@ -242,11 +206,8 @@ export class NotificationService {
           },
           ...(Platform.OS === 'android' && { 
             channelId: 'task-timers',
-            // Android: Use icon URI if available, otherwise app icon is used automatically
-            ...(iconUri && { icon: iconUri }),
+            // Android uses app icon automatically from app.json icon configuration
           }),
-          // iOS: App icon appears automatically in notifications
-          // Attachments require hosted URLs, so we skip them for local assets
         };
 
         const notificationId = await Notifications.scheduleNotificationAsync({
@@ -305,10 +266,9 @@ export class NotificationService {
       const safeTaskTitle = taskTitle.replace(/[^a-zA-Z0-9]/g, '-').substring(0, 50);
       const notificationIdentifier = `task-timer-immediate-${safeTaskTitle}-${taskId || 'unknown'}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       
-      // Get app icon URI for notification
-      const iconUri = await getAppIconUri();
-      
-      // Build notification content with icon
+      // Build notification content
+      // Android: App icon is used automatically from app.json/AndroidManifest
+      // iOS: App icon appears automatically from app bundle
       const notificationContent: Notifications.NotificationContentInput = {
         title: 'Task Timer Complete! ⏰',
         body: `"${taskTitle}" timer is finished. Time to move on to the next task!`,
@@ -322,11 +282,8 @@ export class NotificationService {
         },
         ...(Platform.OS === 'android' && { 
           channelId: 'task-timers',
-          // Android: Use icon URI if available, otherwise app icon is used automatically
-          ...(iconUri && { icon: iconUri }),
+          // Android uses app icon automatically from app.json icon configuration
         }),
-        // iOS: App icon appears automatically in notifications
-        // Attachments require hosted URLs, so we skip them for local assets
       };
       
       const notificationId = await Notifications.scheduleNotificationAsync({

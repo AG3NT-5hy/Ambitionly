@@ -59,12 +59,8 @@ if (!isExpoGo) {
   console.log('ℹ️ RevenueCat disabled in Expo Go - requires development build');
 }
 
-// Prevent the splash screen from auto-hiding before app is ready
-try {
-  SplashScreen.preventAutoHideAsync();
-} catch (error) {
-  console.warn('Failed to prevent splash screen auto-hide:', error);
-}
+// Hide splash screen immediately - index.tsx will be the splash screen
+// Don't prevent auto-hide, let it hide right away
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -123,7 +119,7 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
-  const [isReady, setIsReady] = React.useState(false);
+  const [isReady, setIsReady] = React.useState(true); // Start as ready so index.tsx shows immediately
   
   // Initialize auth listener to handle OAuth callbacks
   useAuthListener();
@@ -131,6 +127,20 @@ export default function RootLayout() {
   useEffect(() => {
     let isMounted = true;
     
+    // Hide splash screen immediately so index.tsx can be the splash screen
+    const hideSplash = async () => {
+      try {
+        await SplashScreen.hideAsync();
+        console.log('✅ Native splash screen hidden - showing index.tsx as splash');
+      } catch (error) {
+        console.warn('⚠️ Failed to hide splash screen immediately:', error);
+      }
+    };
+    
+    // Hide splash immediately, then prepare app (non-blocking)
+    hideSplash();
+    
+    // Prepare app in background (non-blocking - index.tsx will show immediately)
     const prepare = async () => {
       try {
         initSentry();
@@ -153,26 +163,8 @@ export default function RootLayout() {
         });
       } catch (error) {
         console.warn('Error during app preparation:', error);
-      } finally {
-        if (isMounted) {
-          setIsReady(true);
-          // Hide splash screen after state update
-          setTimeout(async () => {
-            try {
-              await SplashScreen.hideAsync();
-              console.log('Splash screen hidden successfully');
-            } catch (error) {
-              console.warn('Failed to hide splash screen:', error);
-              // Try alternative method
-              try {
-                await SplashScreen.hideAsync();
-              } catch (retryError) {
-                console.error('Failed to hide splash screen on retry:', retryError);
-              }
-            }
-          }, 100);
-        }
       }
+      // No need to set isReady - it's already true
     };
     
     prepare();
@@ -181,10 +173,6 @@ export default function RootLayout() {
       isMounted = false;
     };
   }, []);
-
-  if (!isReady) {
-    return null; // Return null to show native splash screen
-  }
 
   return (
     <ErrorBoundary>
