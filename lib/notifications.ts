@@ -22,9 +22,53 @@ if (!isExpoGo) {
   }
 }
 
+// Minimum time in the future for scheduling notifications (5 seconds)
+const MINIMUM_FUTURE_TIME_MS = 5000;
+
+// Cache for app icon URI
+let appIconUri: string | null = null;
+
+/**
+ * Get the app icon URI for use in notifications
+ * On Android, this returns a local file URI that can be used in the icon property
+ * On iOS, the app icon appears automatically, but we can also use attachments
+ */
+async function getAppIconUri(): Promise<string | null> {
+  if (appIconUri) {
+    return appIconUri;
+  }
+
+  try {
+    // Try to use expo-asset if available
+    let Asset;
+    try {
+      Asset = require('expo-asset').Asset;
+    } catch {
+      // expo-asset not available, will use app icon automatically
+      return null;
+    }
+
+    // Load the app icon asset
+    const iconAsset = require('../assets/images/icon.png');
+    const asset = Asset.fromModule(iconAsset);
+    await asset.downloadAsync();
+    
+    if (asset.localUri) {
+      appIconUri = asset.localUri;
+      return appIconUri;
+    }
+  } catch (error) {
+    console.warn('[Notifications] Failed to load app icon for notifications:', error);
+    // App icon will be used automatically by the system
+  }
+
+  return null;
+}
+
 export class NotificationService {
   private static hasPermission = false;
   private static isInitialized = false;
+  private static activeNotificationIds = new Set<string>();
 
   static async initialize(): Promise<boolean> {
     if (this.isInitialized) {
@@ -46,18 +90,22 @@ export class NotificationService {
         return false;
       }
 
-      // Android-specific initialization
+      // Android-specific initialization - create task-timers channel first
       if (Platform.OS === 'android') {
         try {
-          await Notifications.setNotificationChannelAsync('default', {
-            name: 'Default',
-            importance: Notifications.AndroidImportance.DEFAULT,
+          // Create the task-timers channel with HIGH importance
+          await Notifications.setNotificationChannelAsync('task-timers', {
+            name: 'Task Timers',
+            importance: Notifications.AndroidImportance.HIGH,
             vibrationPattern: [0, 250, 250, 250],
             lightColor: '#FF231F7C',
+            sound: 'default',
+            enableVibrate: true,
+            showBadge: false,
           });
+          console.log('[Notifications] ✅ Task timers channel created');
         } catch (androidError) {
           console.warn('[Notifications] Android channel setup failed:', androidError);
-          // Continue with initialization even if channel setup fails
         }
       }
 
@@ -66,15 +114,22 @@ export class NotificationService {
       let finalStatus = existingStatus;
 
       if (existingStatus !== 'granted') {
-        const { status } = await Notifications.requestPermissionsAsync();
+        const { status } = await Notifications.requestPermissionsAsync({
+          ios: {
+            allowAlert: true,
+            allowBadge: false,
+            allowSound: true,
+            allowAnnouncements: false,
+          },
+        });
         finalStatus = status;
       }
 
       if (finalStatus !== 'granted') {
-        console.log('[Notifications] Permission not granted');
+        console.log('[Notifications] Permission not granted:', finalStatus);
         this.hasPermission = false;
       } else {
-        console.log('[Notifications] Permission granted');
+        console.log('[Notifications] ✅ Permission granted');
         this.hasPermission = true;
       }
 
@@ -88,101 +143,92 @@ export class NotificationService {
     }
   }
 
+  /**
+   * Schedule a notification for when a task timer completes
+   * @param taskTitle - Title of the task
+   * @param triggerInSeconds - Number of seconds from now to trigger the notification (MUST be >= 5 seconds)
+   * @param taskId - Optional task ID for tracking
+   * @returns Notification ID or null if scheduling failed
+   */
   static async scheduleTaskCompleteNotification(
     taskTitle: string,
-    triggerInSeconds?: number
+    triggerInSeconds: number,
+    taskId?: string
   ): Promise<string | null> {
+    // CRITICAL: Validate trigger time - must be at least 5 seconds in the future
+    if (!triggerInSeconds || triggerInSeconds < 5 || isNaN(triggerInSeconds) || !isFinite(triggerInSeconds)) {
+      console.error('[Notifications] ❌ Invalid triggerInSeconds:', triggerInSeconds, '- must be >= 5 seconds. Notification will NOT be scheduled.');
+      return null;
+    }
+
     try {
+      // Web platform - use browser notifications
       if (Platform.OS === 'web') {
-        // Fallback for web - show browser notification if supported
         if ('Notification' in window && Notification.permission === 'granted') {
-          if (triggerInSeconds && triggerInSeconds > 0) {
-            // Schedule for future
-            setTimeout(() => {
-              new Notification('Task Timer Complete! ⏰', {
-                body: `"${taskTitle}" timer is finished. Time to move on to the next task!`,
-                icon: '/favicon.png',
-                tag: 'task-complete',
-              });
-            }, triggerInSeconds * 1000);
-          } else {
-            // Show immediately
+          setTimeout(() => {
             new Notification('Task Timer Complete! ⏰', {
               body: `"${taskTitle}" timer is finished. Time to move on to the next task!`,
               icon: '/favicon.png',
-              tag: 'task-complete',
+              tag: `task-complete-${taskId || Date.now()}`,
             });
-          }
-        } else {
-          console.log('[Notifications] Web notifications not available or not permitted');
+          }, triggerInSeconds * 1000);
+          const notificationId = `web-notification-${Date.now()}`;
+          this.activeNotificationIds.add(notificationId);
+          console.log(`[Notifications] ✅ Web notification scheduled for ${triggerInSeconds} seconds`);
+          return notificationId;
         }
         return null;
       }
 
+      // Expo Go - notifications not supported
       if (isExpoGo) {
         console.log('[Notifications] Expo Go detected - notification scheduling disabled');
         return null;
       }
 
+      // Ensure we have permission
       if (!this.hasPermission) {
-        console.log('[Notifications] No permission to send notifications');
-        return null;
-      }
-
-      // Android-specific notification handling
-      if (Platform.OS === 'android') {
-        try {
-          // Ensure notification channel exists with HIGH importance for better reliability
-          const channels = await Notifications.getNotificationChannelsAsync();
-          const defaultChannel = channels.find(channel => channel.id === 'task-timers');
-          if (!defaultChannel) {
-            await Notifications.setNotificationChannelAsync('task-timers', {
-              name: 'Task Timers',
-              importance: Notifications.AndroidImportance.HIGH,
-              vibrationPattern: [0, 250, 250, 250],
-              lightColor: '#FF231F7C',
-              sound: 'default',
-              enableVibrate: true,
-              showBadge: false,
-            });
-          }
-        } catch (channelError) {
-          console.warn('[Notifications] Android channel check failed:', channelError);
+        const hasPermission = await this.initialize();
+        if (!hasPermission) {
+          console.warn('[Notifications] No permission to send notifications');
+          return null;
         }
       }
 
-      // Determine trigger - if triggerInSeconds is provided, schedule for future
-      let trigger: Notifications.NotificationTriggerInput | null = null;
-      if (triggerInSeconds && triggerInSeconds > 0) {
-        // Use exact date/time for better reliability
-        // Add a small buffer to ensure it's in the future
-        const now = Date.now();
-        const triggerTime = now + (triggerInSeconds * 1000);
-        const triggerDate = new Date(triggerTime);
-        
-        // Ensure trigger is at least 5 seconds in the future to prevent immediate firing
-        const minimumFutureTime = now + 5000; // 5 seconds minimum
-        if (triggerDate.getTime() < minimumFutureTime) {
-          console.warn(`[Notifications] Trigger time ${triggerInSeconds}s is too soon, adjusting to minimum 5 seconds`);
-          triggerDate.setTime(minimumFutureTime);
-        }
-        
-        trigger = {
-          date: triggerDate,
-        };
-        const secondsUntilTrigger = Math.round((triggerDate.getTime() - now) / 1000);
-        console.log(`[Notifications] Scheduling notification for ${triggerInSeconds} seconds (${triggerDate.toISOString()}, ${secondsUntilTrigger}s from now)`);
-      } else {
-        // If no trigger specified, this should not be called for scheduled notifications
-        console.warn('[Notifications] scheduleTaskCompleteNotification called without triggerInSeconds - notification will be sent immediately');
-        // Don't schedule if no trigger - return null to indicate no notification was scheduled
+      // Calculate exact trigger time
+      const now = Date.now();
+      const triggerTimeMs = triggerInSeconds * 1000;
+      const triggerTime = now + triggerTimeMs;
+      const triggerDate = new Date(triggerTime);
+
+      // Validate trigger is in the future with minimum buffer
+      const minimumTriggerTime = now + MINIMUM_FUTURE_TIME_MS;
+      if (triggerDate.getTime() < minimumTriggerTime) {
+        console.error('[Notifications] ❌ Trigger time is too soon - must be at least 5 seconds in the future');
         return null;
       }
 
-      const notificationIdentifier = `task-timer-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      // Create unique identifier for this notification
+      const safeTaskTitle = taskTitle.replace(/[^a-zA-Z0-9]/g, '-').substring(0, 50);
+      const notificationIdentifier = `task-timer-${safeTaskTitle}-${taskId || 'unknown'}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const safeTriggerSeconds = Math.max(5, Math.round(triggerInSeconds));
       
-      const notificationId = await Notifications.scheduleNotificationAsync({
-        content: {
+      // Use proper timeInterval trigger format with explicit type
+      // This ensures the notification fires after the specified seconds, not immediately
+      // Using 'timeInterval' type explicitly prevents the notification from firing immediately
+      const notificationTrigger: Notifications.TimeIntervalTriggerInput = {
+        type: 'timeInterval' as const,
+        seconds: safeTriggerSeconds,
+        repeats: false,
+      };
+      
+      // Schedule the notification
+      try {
+        // Get app icon URI for notification
+        const iconUri = await getAppIconUri();
+        
+        // Build notification content with icon
+        const notificationContent: Notifications.NotificationContentInput = {
           title: 'Task Timer Complete! ⏰',
           body: `"${taskTitle}" timer is finished. Time to move on to the next task!`,
           sound: 'default',
@@ -190,36 +236,149 @@ export class NotificationService {
           data: {
             type: 'task-timer-complete',
             taskTitle,
+            taskId: taskId || null,
+            scheduledAt: now,
+            triggerInSeconds: safeTriggerSeconds,
           },
-          ...(Platform.OS === 'android' && { channelId: 'task-timers' }),
+          ...(Platform.OS === 'android' && { 
+            channelId: 'task-timers',
+            // Android: Use icon URI if available, otherwise app icon is used automatically
+            ...(iconUri && { icon: iconUri }),
+          }),
+          // iOS: App icon appears automatically in notifications
+          // Attachments require hosted URLs, so we skip them for local assets
+        };
+
+        const notificationId = await Notifications.scheduleNotificationAsync({
+          content: notificationContent,
+          trigger: notificationTrigger,
+          identifier: notificationIdentifier,
+        });
+
+        // Track this notification
+        this.activeNotificationIds.add(notificationId);
+
+        const expectedTriggerTime = new Date(now + safeTriggerSeconds * 1000);
+        console.log(`[Notifications] ✅ Notification scheduled successfully:`);
+        console.log(`  - Notification ID: ${notificationId}`);
+        console.log(`  - Identifier: ${notificationIdentifier}`);
+        console.log(`  - Task: "${taskTitle}" (ID: ${taskId || 'unknown'})`);
+        console.log(`  - Trigger type: timeInterval`);
+        console.log(`  - Trigger: ${safeTriggerSeconds} seconds from now`);
+        console.log(`  - Expected trigger time: ${expectedTriggerTime.toISOString()}`);
+        console.log(`  - Current time: ${new Date(now).toISOString()}`);
+        
+        return notificationId;
+      } catch (scheduleError) {
+        console.error('[Notifications] ❌ Error scheduling notification:', scheduleError);
+        return null;
+      }
+    } catch (error) {
+      console.error('[Notifications] ❌ Error in scheduleTaskCompleteNotification:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Send an immediate notification (ONLY use when timer has actually completed and scheduled notification failed)
+   * This should ONLY be called when the timer has actually completed and we need a fallback
+   */
+  static async sendImmediateNotification(taskTitle: string, taskId?: string): Promise<string | null> {
+    try {
+      if (Platform.OS === 'web') {
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification('Task Timer Complete! ⏰', {
+            body: `"${taskTitle}" timer is finished. Time to move on to the next task!`,
+            icon: '/favicon.png',
+            tag: `task-complete-immediate-${taskId || Date.now()}`,
+          });
+          console.log('[Notifications] ✅ Immediate web notification sent');
+          return `web-notification-immediate-${Date.now()}`;
+        }
+        return null;
+      }
+
+      if (isExpoGo || !this.hasPermission) {
+        return null;
+      }
+
+      const safeTaskTitle = taskTitle.replace(/[^a-zA-Z0-9]/g, '-').substring(0, 50);
+      const notificationIdentifier = `task-timer-immediate-${safeTaskTitle}-${taskId || 'unknown'}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Get app icon URI for notification
+      const iconUri = await getAppIconUri();
+      
+      // Build notification content with icon
+      const notificationContent: Notifications.NotificationContentInput = {
+        title: 'Task Timer Complete! ⏰',
+        body: `"${taskTitle}" timer is finished. Time to move on to the next task!`,
+        sound: 'default',
+        priority: Notifications.AndroidNotificationPriority.HIGH,
+        data: {
+          type: 'task-timer-complete',
+          taskTitle,
+          taskId: taskId || null,
+          immediate: true,
         },
-        trigger: trigger, // null for immediate, or date for scheduled
+        ...(Platform.OS === 'android' && { 
+          channelId: 'task-timers',
+          // Android: Use icon URI if available, otherwise app icon is used automatically
+          ...(iconUri && { icon: iconUri }),
+        }),
+        // iOS: App icon appears automatically in notifications
+        // Attachments require hosted URLs, so we skip them for local assets
+      };
+      
+      const notificationId = await Notifications.scheduleNotificationAsync({
+        content: notificationContent,
+        trigger: null, // Immediate
         identifier: notificationIdentifier,
       });
 
-      if (trigger) {
-        console.log(`[Notifications] Task complete notification scheduled successfully. ID: ${notificationId}, Identifier: ${notificationIdentifier}, Trigger: ${triggerInSeconds} seconds`);
-      } else {
-        console.log(`[Notifications] Task complete notification sent immediately. ID: ${notificationId}`);
-      }
-      
+      this.activeNotificationIds.add(notificationId);
+      console.log(`[Notifications] ✅ Immediate notification sent. ID: ${notificationId}`);
       return notificationId;
     } catch (error) {
-      console.error('[Notifications] Error sending notification:', error);
+      console.error('[Notifications] ❌ Error sending immediate notification:', error);
       return null;
     }
   }
 
   static async cancelNotification(notificationId: string): Promise<void> {
     try {
-      if (Platform.OS === 'web' || isExpoGo) {
+      if (Platform.OS === 'web' || isExpoGo || !notificationId) {
         return;
       }
 
-      await Notifications.cancelScheduledNotificationAsync(notificationId);
-      console.log(`[Notifications] Cancelled notification: ${notificationId}`);
+      // Remove from tracking
+      this.activeNotificationIds.delete(notificationId);
+
+      // Try to cancel by ID first
+      try {
+        await Notifications.cancelScheduledNotificationAsync(notificationId);
+        console.log(`[Notifications] ✅ Cancelled notification: ${notificationId}`);
+        return;
+      } catch (error) {
+        // If that fails, try to find it by identifier pattern
+        console.warn(`[Notifications] Could not cancel notification by ID ${notificationId}, trying to find by identifier...`);
+      }
+
+      // Fallback: Get all scheduled notifications and cancel matching ones
+      const allNotifications = await Notifications.getAllScheduledNotificationsAsync();
+      const matchingNotifications = allNotifications.filter(n => 
+        n.identifier?.includes(notificationId) || 
+        n.content?.data?.taskId === notificationId
+      );
+
+      for (const notification of matchingNotifications) {
+        if (notification.identifier) {
+          await Notifications.cancelScheduledNotificationAsync(notification.identifier);
+          this.activeNotificationIds.delete(notification.identifier);
+          console.log(`[Notifications] ✅ Cancelled notification by identifier: ${notification.identifier}`);
+        }
+      }
     } catch (error) {
-      console.error('[Notifications] Error cancelling notification:', error);
+      console.error('[Notifications] ❌ Error cancelling notification:', error);
     }
   }
 
@@ -231,19 +390,21 @@ export class NotificationService {
 
       const allNotifications = await Notifications.getAllScheduledNotificationsAsync();
       const taskTimerNotifications = allNotifications.filter(
-        (notification) => notification.identifier?.startsWith('task-timer-') ||
-                         notification.content?.data?.type === 'task-timer-complete'
+        (notification) => 
+          notification.identifier?.startsWith('task-timer-') ||
+          notification.content?.data?.type === 'task-timer-complete'
       );
 
       for (const notification of taskTimerNotifications) {
         if (notification.identifier) {
           await Notifications.cancelScheduledNotificationAsync(notification.identifier);
+          this.activeNotificationIds.delete(notification.identifier);
         }
       }
 
-      console.log(`[Notifications] Cancelled ${taskTimerNotifications.length} task timer notifications`);
+      console.log(`[Notifications] ✅ Cancelled ${taskTimerNotifications.length} task timer notifications`);
     } catch (error) {
-      console.error('[Notifications] Error cancelling task timer notifications:', error);
+      console.error('[Notifications] ❌ Error cancelling task timer notifications:', error);
     }
   }
 
@@ -267,6 +428,35 @@ export class NotificationService {
       console.error('[Notifications] Error requesting web permission:', error);
       return false;
     }
+  }
+
+  /**
+   * Get all scheduled notifications (for debugging)
+   */
+  static async getAllScheduledNotifications(): Promise<Notifications.NotificationRequest[]> {
+    try {
+      if (Platform.OS === 'web' || isExpoGo) {
+        return [];
+      }
+      return await Notifications.getAllScheduledNotificationsAsync();
+    } catch (error) {
+      console.error('[Notifications] Error getting scheduled notifications:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Check if a notification ID is still active
+   */
+  static isNotificationActive(notificationId: string): boolean {
+    return this.activeNotificationIds.has(notificationId);
+  }
+
+  /**
+   * Get count of active notifications
+   */
+  static getActiveNotificationCount(): number {
+    return this.activeNotificationIds.size;
   }
 }
 

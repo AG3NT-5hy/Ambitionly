@@ -3,6 +3,7 @@ import { publicProcedure } from '../../../create-context';
 import { prisma } from '../../../../../lib/prisma'
 import { supabaseUserDataService } from '../../../../lib/supabase-user-data'
 import { emailStorageService } from '../../../../../lib/email-storage'
+import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 
 const LoginSchema = z.object({
@@ -10,8 +11,8 @@ const LoginSchema = z.object({
   password: z.string(),
 });
 
-function hashPassword(password: string): string {
-  return crypto.createHash('sha256').update(password).digest('hex');
+async function verifyPassword(password: string, hash: string): Promise<boolean> {
+  return bcrypt.compare(password, hash);
 }
 
 function generateToken(userId: string): string {
@@ -31,16 +32,23 @@ export const loginProcedure = publicProcedure
         throw new Error('Invalid email or password');
       }
 
-      const hashedPassword = hashPassword(input.password);
+      if (!user.password) {
+        throw new Error('Invalid email or password');
+      }
 
-      if (user.password !== hashedPassword) {
+      const isValidPassword = await verifyPassword(input.password, user.password);
+
+      if (!isValidPassword) {
         throw new Error('Invalid email or password');
       }
 
       const token = generateToken(user.id);
 
-      // Store email for admin access
-      emailStorageService.addEmail(input.email, user.id, 'login');
+      // Store email for admin access (non-blocking)
+      emailStorageService.addEmail(input.email, user.id, 'login').catch(error => {
+        console.warn('[Login] Failed to store email:', error);
+        // Non-critical, continue with login
+      });
 
       // Load user data from Supabase
       let userData = null;

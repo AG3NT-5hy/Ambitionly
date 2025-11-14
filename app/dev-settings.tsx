@@ -14,12 +14,13 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Stack, router } from 'expo-router';
-import { ChevronLeft, Download, Trash2, Bug, Settings, Lock, Eye, EyeOff, Mail, RefreshCw, Filter } from 'lucide-react-native';
+import { ChevronLeft, Download, Trash2, Bug, Settings, Lock, Eye, EyeOff, Mail, RefreshCw, Filter, Crown } from 'lucide-react-native';
 import { COLORS } from '../constants'
 import { debugService, log, type DebugInfo } from '../lib/debug'
 import { analytics } from '../lib/analytics'
 import { useAmbition } from '../hooks/ambition-store'
 import EmailViewerFallback from '@/components/EmailViewerFallback'
+import { trpc } from '../lib/trpc'
 
 // Developer credentials - in production, these should be stored securely
 const DEV_USERNAME = 'ag3nt';
@@ -40,6 +41,18 @@ const DevSettingsScreen: React.FC = () => {
   const [logs, setLogs] = useState(debugService.getLogs(undefined, undefined, 200));
   const [logLevelFilter, setLogLevelFilter] = useState<'debug' | 'info' | 'warn' | 'error' | undefined>(undefined);
   const { clearAllData, resetProgress } = useAmbition();
+  
+  // Premium access grant state
+  const [grantEmail, setGrantEmail] = useState('');
+  const [grantPlan, setGrantPlan] = useState<'monthly' | 'annual' | 'lifetime'>('monthly');
+  const [showGrantPremium, setShowGrantPremium] = useState(false);
+  const grantPremiumMutation = trpc.admin.users.grantPremium.useMutation();
+
+  const refreshLogs = useCallback((level?: 'debug' | 'info' | 'warn' | 'error') => {
+    const next = debugService.getLogs(level, undefined, 200);
+    setLogs(next);
+    setLogLevelFilter(level);
+  }, []);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -47,7 +60,7 @@ const DevSettingsScreen: React.FC = () => {
       setOfflineMode(debugService.getOfflineMode());
       refreshLogs();
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, refreshLogs]);
 
   // Auto-refresh logs every 2 seconds when authenticated
   useEffect(() => {
@@ -109,12 +122,6 @@ const DevSettingsScreen: React.FC = () => {
     analytics.setEnabled(newEnabled);
     log.info('DevSettings', `Analytics toggled: ${newEnabled}`);
   };
-
-  const refreshLogs = useCallback((level?: 'debug' | 'info' | 'warn' | 'error') => {
-    const next = debugService.getLogs(level, undefined, 200);
-    setLogs(next);
-    setLogLevelFilter(level);
-  }, []);
 
   const handleExportLogs = async () => {
     try {
@@ -223,6 +230,48 @@ const DevSettingsScreen: React.FC = () => {
   const handleViewEmails = () => {
     setShowEmailViewer(true);
     log.info('DevSettings', 'Email viewer accessed');
+  };
+
+  const handleGrantPremium = async () => {
+    if (!grantEmail.trim()) {
+      Alert.alert('Error', 'Please enter an email address');
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(grantEmail.trim())) {
+      Alert.alert('Error', 'Please enter a valid email address');
+      return;
+    }
+
+    try {
+      const result = await grantPremiumMutation.mutateAsync({
+        email: grantEmail.trim(),
+        plan: grantPlan,
+      });
+
+      if (result.success) {
+        Alert.alert(
+          'Success',
+          `Premium ${grantPlan} plan granted to ${grantEmail.trim()}`,
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                setGrantEmail('');
+                setShowGrantPremium(false);
+              },
+            },
+          ]
+        );
+        log.info('DevSettings', `Premium access granted to ${grantEmail.trim()}`, { plan: grantPlan });
+        analytics.track('admin_premium_granted', { plan: grantPlan });
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to grant premium access';
+      Alert.alert('Error', errorMessage);
+      log.error('DevSettings', 'Failed to grant premium access', error);
+    }
   };
 
   const renderInfoSection = (title: string, data: any) => {
@@ -499,6 +548,12 @@ const DevSettingsScreen: React.FC = () => {
           <Text style={styles.sectionTitle}>Actions</Text>
           
           {renderActionButton(
+            'Grant Premium Access',
+            () => setShowGrantPremium(true),
+            <Crown size={20} color={COLORS.PRIMARY} />
+          )}
+          
+          {renderActionButton(
             'View Collected Emails',
             handleViewEmails,
             <Mail size={20} color={COLORS.PRIMARY} />
@@ -597,6 +652,81 @@ const DevSettingsScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
       </ScrollView>
+      
+      {/* Grant Premium Modal */}
+      {showGrantPremium && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Grant Premium Access</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowGrantPremium(false);
+                  setGrantEmail('');
+                }}
+                style={styles.modalCloseButton}
+              >
+                <Text style={styles.modalCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.modalBody}>
+              <View style={styles.inputContainer}>
+                <Text style={styles.inputLabel}>User Email</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={grantEmail}
+                  onChangeText={setGrantEmail}
+                  placeholder="user@example.com"
+                  placeholderTextColor={COLORS.TEXT_MUTED}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="email-address"
+                />
+              </View>
+              
+              <View style={styles.inputContainer}>
+                <Text style={styles.inputLabel}>Subscription Plan</Text>
+                <View style={styles.planSelector}>
+                  {(['monthly', 'annual', 'lifetime'] as const).map((plan) => (
+                    <TouchableOpacity
+                      key={plan}
+                      style={[
+                        styles.planOption,
+                        grantPlan === plan && styles.planOptionActive,
+                      ]}
+                      onPress={() => setGrantPlan(plan)}
+                    >
+                      <Text
+                        style={[
+                          styles.planOptionText,
+                          grantPlan === plan && styles.planOptionTextActive,
+                        ]}
+                      >
+                        {plan === 'monthly' ? 'Monthly' : plan === 'annual' ? 'Annual' : 'Lifetime'}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+              
+              <TouchableOpacity
+                style={[
+                  styles.grantButton,
+                  (!grantEmail.trim() || grantPremiumMutation.isPending) && styles.grantButtonDisabled,
+                ]}
+                onPress={handleGrantPremium}
+                disabled={!grantEmail.trim() || grantPremiumMutation.isPending}
+              >
+                <Crown size={18} color={COLORS.BACKGROUND} />
+                <Text style={styles.grantButtonText}>
+                  {grantPremiumMutation.isPending ? 'Granting...' : 'Grant Premium Access'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
     </View>
   );
 };
@@ -918,6 +1048,96 @@ const styles = StyleSheet.create({
     color: COLORS.TEXT_SECONDARY,
     fontSize: 14,
     fontWeight: '500',
+  },
+  // Grant Premium Modal Styles
+  modalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  modalContent: {
+    backgroundColor: COLORS.BACKGROUND,
+    borderRadius: 16,
+    padding: 24,
+    width: '90%',
+    maxWidth: 400,
+    borderWidth: 1,
+    borderColor: COLORS.BORDER,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  modalTitle: {
+    color: COLORS.TEXT_PRIMARY,
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  modalCloseButton: {
+    padding: 4,
+  },
+  modalCloseText: {
+    color: COLORS.TEXT_SECONDARY,
+    fontSize: 24,
+    fontWeight: '300',
+  },
+  modalBody: {
+    gap: 16,
+  },
+  planSelector: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  planOption: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.BORDER,
+    backgroundColor: COLORS.SURFACE,
+    alignItems: 'center',
+  },
+  planOptionActive: {
+    borderColor: COLORS.PRIMARY,
+    backgroundColor: `${COLORS.PRIMARY}15`,
+  },
+  planOptionText: {
+    color: COLORS.TEXT_SECONDARY,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  planOptionTextActive: {
+    color: COLORS.PRIMARY,
+    fontWeight: '600',
+  },
+  grantButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.PRIMARY,
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 8,
+    gap: 8,
+  },
+  grantButtonDisabled: {
+    backgroundColor: COLORS.BORDER,
+    opacity: 0.6,
+  },
+  grantButtonText: {
+    color: COLORS.BACKGROUND,
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 

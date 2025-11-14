@@ -19,9 +19,8 @@ export default function GeneratingScreen() {
   const [isGenerating, setIsGenerating] = useState(false);
   const hasGeneratedRef = useRef(false);
   
-  // Image URIs
-  const logoUri = 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/cixvx1m8voutz5e0sag12';
-  const fallbackUri = 'https://via.placeholder.com/110x110/29202B/FFFFFF?text=Logo';
+  // Local logo asset
+  const logoSource = require('../assets/images/logo-crafting.png');
   
   // Background animation values
   const backgroundAnim1 = useRef(new Animated.Value(0)).current;
@@ -488,12 +487,9 @@ export default function GeneratingScreen() {
                 {/* Stationary logo */}
                 <View style={styles.logoInner}>
                   <Image 
-                    source={{ uri: logoUri || fallbackUri }}
+                    source={logoSource}
                     style={styles.logoImage}
                     resizeMode="contain"
-                    onError={(error) => {
-                      console.warn('Logo image failed to load:', error.nativeEvent.error);
-                    }}
                   />
                 </View>
               </View>

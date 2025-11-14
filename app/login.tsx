@@ -16,9 +16,8 @@ export default function LoginScreen() {
   const slideAnim = useRef(new Animated.Value(50)).current;
   const logoScaleAnim = useRef(new Animated.Value(0.8)).current;
   
-  // Logo URI from index.tsx
-  const logoUri = 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/hh7r1htr39t6bzf7t6c4i';
-  const fallbackUri = 'https://via.placeholder.com/120x120/29202B/FFFFFF?text=Logo';
+  // Local logo asset
+  const logoSource = require('../assets/images/logo-main.png');
 
   useEffect(() => {
     // Start entrance animations
@@ -133,12 +132,9 @@ export default function LoginScreen() {
                 />
                 <View style={styles.logoInner}>
                   <Image
-                    source={{ uri: logoUri || fallbackUri }}
+                    source={logoSource}
                     style={styles.logoImage}
                     resizeMode="contain"
-                    onError={(error) => {
-                      console.warn('Logo image failed to load:', error.nativeEvent.error);
-                    }}
                   />
                 </View>
               </View>

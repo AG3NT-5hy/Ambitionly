@@ -207,8 +207,7 @@ class ConsoleLoggerService {
 // Export singleton instance
 export const consoleLogger = new ConsoleLoggerService();
 
-// Auto-start capture in development
-if (__DEV__) {
-  consoleLogger.startCapture();
-}
+// Auto-start capture in development AND production (for APK debugging)
+// This allows seeing console.log even in production builds
+consoleLogger.startCapture();
 

@@ -6,8 +6,10 @@ const emailsApi = new Hono();
 // Get all emails
 emailsApi.get('/', async (c) => {
   try {
-    const emails = emailStorageService.getAllEmails();
-    const stats = emailStorageService.getStats();
+    const [emails, stats] = await Promise.all([
+      emailStorageService.getAllEmails(),
+      emailStorageService.getStats(),
+    ]);
     
     return c.json({
       emails,
@@ -37,9 +39,9 @@ emailsApi.get('/export', async (c) => {
     
     let content: string;
     if (format === 'csv') {
-      content = emailStorageService.exportEmailsAsCSV();
+      content = await emailStorageService.exportEmailsAsCSV();
     } else {
-      content = emailStorageService.exportEmailsAsText();
+      content = await emailStorageService.exportEmailsAsText();
     }
     
     return c.text(content, 200, {
@@ -55,7 +57,7 @@ emailsApi.get('/export', async (c) => {
 // Clear emails
 emailsApi.delete('/', async (c) => {
   try {
-    emailStorageService.clearEmails();
+    await emailStorageService.clearEmails();
     
     return c.json({
       success: true,

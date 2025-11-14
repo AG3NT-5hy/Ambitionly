@@ -10,7 +10,12 @@ const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn('[supabase] Missing EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_ANON_KEY');
+  console.warn('[supabase] ⚠️ Missing EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_ANON_KEY');
+}
+
+if (!supabaseServiceRoleKey) {
+  console.error('[supabase] ⚠️ SUPABASE_SERVICE_ROLE_KEY is missing! Admin operations (like auto-confirming users) will fail.');
+  console.error('[supabase] ⚠️ Get your service role key from: Supabase Dashboard > Settings > API > service_role key');
 }
 
 // Server-side Supabase client without React Native storage

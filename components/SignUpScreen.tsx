@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, KeyboardAvoidingView, Platform, Animated, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { X, Mail, User as UserIcon, Shield, Cloud, Bell, Lock, Eye, EyeOff } from 'lucide-react-native';
+import { X, Mail, User as UserIcon, Shield, Cloud, Bell, Lock, Eye, EyeOff, Chrome, ArrowRight } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -12,9 +12,11 @@ interface SignUpScreenProps {
   onClose: () => void;
   onSignUp: (email: string, password: string, name: string, username?: string) => Promise<void>;
   onSignIn?: (email: string, password: string) => Promise<void>;
+  onSignUpWithGoogle?: () => Promise<boolean>;
+  onSignInWithGoogle?: () => Promise<boolean>;
 }
 
-export default function SignUpScreen({ onClose, onSignUp, onSignIn }: SignUpScreenProps) {
+export default function SignUpScreen({ onClose, onSignUp, onSignIn, onSignUpWithGoogle, onSignInWithGoogle }: SignUpScreenProps) {
   const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<AuthMode>('signup');
   const [email, setEmail] = useState<string>('');
@@ -24,6 +26,7 @@ export default function SignUpScreen({ onClose, onSignUp, onSignIn }: SignUpScre
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState<boolean>(false);
 
   const backgroundAnim1 = useRef(new Animated.Value(0)).current;
   const backgroundAnim2 = useRef(new Animated.Value(0)).current;
@@ -150,6 +153,36 @@ export default function SignUpScreen({ onClose, onSignUp, onSignIn }: SignUpScre
   const validateEmail = (email: string): boolean => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email);
+  };
+
+  const handleGoogleAuth = async () => {
+    const googleAction =
+      mode === 'signup'
+        ? onSignUpWithGoogle ?? onSignInWithGoogle
+        : onSignInWithGoogle ?? onSignUpWithGoogle;
+
+    if (!googleAction) {
+      setError('Google authentication is not available at the moment.');
+      return;
+    }
+
+    setError('');
+    setIsGoogleLoading(true);
+
+    try {
+      const result = await googleAction();
+      if (result === false) {
+        return;
+      }
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : `Failed to ${mode === 'signup' ? 'sign up' : 'sign in'} with Google`
+      );
+    } finally {
+      setIsGoogleLoading(false);
+    }
   };
 
   const handleSubmit = async () => {
@@ -338,6 +371,18 @@ export default function SignUpScreen({ onClose, onSignUp, onSignIn }: SignUpScre
       },
     ],
   };
+
+  const googleActionAvailable = Boolean(
+    mode === 'signup'
+      ? onSignUpWithGoogle ?? onSignInWithGoogle
+      : onSignInWithGoogle ?? onSignUpWithGoogle
+  );
+
+  const googleButtonLabel = isGoogleLoading
+    ? 'Connecting...'
+    : mode === 'signup'
+      ? 'Sign Up with Google'
+      : 'Sign In with Google';
 
   return (
     <View style={styles.container}>
@@ -593,6 +638,35 @@ export default function SignUpScreen({ onClose, onSignUp, onSignIn }: SignUpScre
                 </LinearGradient>
               </TouchableOpacity>
 
+              {googleActionAvailable && (
+                <View style={styles.socialContainer}>
+                  <View style={styles.dividerContainer}>
+                    <View style={styles.dividerLine} />
+                    <Text style={styles.dividerText}>or continue with</Text>
+                    <View style={styles.dividerLine} />
+                  </View>
+                  <TouchableOpacity
+                    style={[
+                      styles.googleButton,
+                      (isLoading || isGoogleLoading) && styles.googleButtonDisabled,
+                    ]}
+                    onPress={handleGoogleAuth}
+                    disabled={isLoading || isGoogleLoading}
+                    accessibilityLabel={mode === 'signup' ? 'Sign up with Google' : 'Sign in with Google'}
+                    activeOpacity={0.85}
+                  >
+                    <LinearGradient
+                      colors={['#1A1A1A', '#2D2D2D']}
+                      style={styles.googleButtonGradient}
+                    >
+                      <Chrome size={20} color="#FFFFFF" />
+                      <Text style={styles.googleButtonText}>{googleButtonLabel}</Text>
+                      <ArrowRight size={16} color="#9A9A9A" />
+                    </LinearGradient>
+                  </TouchableOpacity>
+                </View>
+              )}
+
               <TouchableOpacity
                 style={styles.skipButton}
                 onPress={onClose}
@@ -827,6 +901,47 @@ const styles = StyleSheet.create({
   },
   signUpButtonText: {
     fontSize: 18,
+    fontWeight: '600' as const,
+    color: '#FFFFFF',
+  },
+  socialContainer: {
+    marginTop: 8,
+    gap: 12,
+  },
+  dividerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#2D2D2D',
+  },
+  dividerText: {
+    color: '#666666',
+    fontSize: 12,
+    textTransform: 'uppercase' as const,
+    letterSpacing: 1,
+    marginHorizontal: 12,
+  },
+  googleButton: {
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  googleButtonDisabled: {
+    opacity: 0.6,
+  },
+  googleButtonGradient: {
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  googleButtonText: {
+    fontSize: 16,
     fontWeight: '600' as const,
     color: '#FFFFFF',
   },

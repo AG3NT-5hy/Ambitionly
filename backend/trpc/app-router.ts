@@ -2,8 +2,10 @@ import { createTRPCRouter } from "./create-context";
 import { loginProcedure } from "./routes/auth/login/route";
 import { signupProcedure } from "./routes/auth/signup/route";
 import { verifyTokenProcedure } from "./routes/auth/verify/route";
+import { confirmSupabaseUserProcedure } from "./routes/auth/confirm-supabase-user/route";
 import { syncDataProcedure, getUserDataProcedure, clearUserDataProcedure } from "./routes/user/sync/route";
 import { getEmailsProcedure, exportEmailsProcedure, clearEmailsProcedure, getEmailStatsProcedure } from "./routes/admin/emails/route";
+import { grantPremiumProcedure } from "./routes/admin/users/route";
 import { userRouter } from "./routes/user/router";
 import { revenueCatWebhookProcedure } from "./routes/webhooks/revenuecat/route";
 
@@ -12,6 +14,7 @@ export const appRouter = createTRPCRouter({
     login: loginProcedure,
     signup: signupProcedure,
     verifyToken: verifyTokenProcedure,
+    confirmSupabaseUser: confirmSupabaseUserProcedure,
   }),
   user: createTRPCRouter({
     // Legacy endpoints
@@ -31,6 +34,9 @@ export const appRouter = createTRPCRouter({
       export: exportEmailsProcedure,
       clear: clearEmailsProcedure,
       stats: getEmailStatsProcedure,
+    }),
+    users: createTRPCRouter({
+      grantPremium: grantPremiumProcedure,
     }),
   }),
   webhooks: createTRPCRouter({

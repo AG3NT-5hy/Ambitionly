@@ -48,3 +48,17 @@ model User {
 
   @@map("users")
 }
+
+model EmailRecord {
+  id        String   @id @default(cuid())
+  email     String
+  userId    String
+  source    String   // 'signup' | 'login'
+  createdAt DateTime @default(now())
+  
+  @@index([email])
+  @@index([userId])
+  @@index([source])
+  @@index([createdAt])
+  @@map("email_records")
+}

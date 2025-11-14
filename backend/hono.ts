@@ -11,12 +11,26 @@ const app = new Hono();
 // Enable CORS for all routes
 app.use("*", cors({
   origin: "*", // Allow all origins for now
-  allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowHeaders: ["Content-Type", "Authorization"],
-  exposeHeaders: ["Content-Length"],
+  allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+  allowHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+  exposeHeaders: ["Content-Length", "Content-Type"],
   maxAge: 600,
   credentials: true,
 }));
+
+// Add error handling middleware
+app.onError((err, c) => {
+  console.error('[Hono] Error:', err);
+  return c.json(
+    {
+      error: {
+        message: err.message || 'Internal server error',
+        code: 'INTERNAL_SERVER_ERROR',
+      },
+    },
+    500
+  );
+});
 
 // Mount tRPC router at /api/trpc
 app.use(
@@ -25,6 +39,9 @@ app.use(
     endpoint: "/api/trpc",
     router: appRouter,
     createContext,
+    onError: ({ error, path }) => {
+      console.error(`[tRPC] Error on path "${path}":`, error);
+    },
   })
 );
 
@@ -34,6 +51,19 @@ app.route("/emails", emailsApi);
 // Simple health check endpoint
 app.get("/", (c) => {
   return c.json({ status: "ok", message: "API is running" });
+});
+
+// Health check for tRPC
+app.get("/health", (c) => {
+  return c.json({ 
+    status: "ok", 
+    message: "API is running",
+    endpoints: {
+      trpc: "/api/trpc",
+      emails: "/emails",
+      signup: "/api/trpc/auth.signup (POST)"
+    }
+  });
 });
 
 export default app;

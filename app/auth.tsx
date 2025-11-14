@@ -1,19 +1,21 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Animated, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Animated, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X, Mail, Lock, Eye, EyeOff } from 'lucide-react-native';
-import { useAuth } from '../hooks/auth-store'
+import { useAuth } from '../hooks/auth-store';
 
 export default function AuthScreen() {
-  const { signup, login, dismissAuthFlow } = useAuth();
+  const { signup, login, signInWithGoogle, dismissAuthFlow } = useAuth();
   const insets = useSafeAreaInsets();
   const [isLogin, setIsLogin] = useState<boolean>(false);
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isLoadingGoogle, setIsLoadingGoogle] = useState<boolean>(false);
+  const [error, setError] = useState<string>('');
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
@@ -36,23 +38,75 @@ export default function AuthScreen() {
   const handleSubmit = async () => {
     if (isLoading) return;
 
+    setError('');
+    
+    // Validate inputs
+    if (!email.trim()) {
+      setError('Please enter your email');
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      setError('Please enter a valid email address');
+      return;
+    }
+
+    if (!password.trim()) {
+      setError('Please enter your password');
+      return;
+    }
+
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters');
+      return;
+    }
+
     setIsLoading(true);
     try {
       const success = isLogin 
-        ? await login(email, password)
-        : await signup(email, password);
+        ? await login(email.trim(), password)
+        : await signup(email.trim(), password);
 
       if (success) {
         router.back();
+      } else {
+        setError(isLogin ? 'Invalid email or password' : 'Failed to create account. Please try again.');
       }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred. Please try again.');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    if (isLoadingGoogle) return;
+
+    setError('');
+    setIsLoadingGoogle(true);
+    
+    try {
+      const success = await signInWithGoogle();
+      
+      if (success) {
+        router.back();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to sign in with Google');
+    } finally {
+      setIsLoadingGoogle(false);
     }
   };
 
   const handleClose = () => {
     dismissAuthFlow();
     router.back();
+  };
+
+  const toggleMode = () => {
+    setError('');
+    setIsLogin(!isLogin);
   };
 
   return (
@@ -100,11 +154,15 @@ export default function AuthScreen() {
                   placeholder="Email"
                   placeholderTextColor="#666666"
                   value={email}
-                  onChangeText={setEmail}
+                  onChangeText={(text) => {
+                    setEmail(text);
+                    setError('');
+                  }}
                   keyboardType="email-address"
                   autoCapitalize="none"
                   autoCorrect={false}
-                  editable={!isLoading}
+                  editable={!isLoading && !isLoadingGoogle}
+                  autoComplete="email"
                 />
               </View>
 
@@ -117,11 +175,15 @@ export default function AuthScreen() {
                   placeholder="Password"
                   placeholderTextColor="#666666"
                   value={password}
-                  onChangeText={setPassword}
+                  onChangeText={(text) => {
+                    setPassword(text);
+                    setError('');
+                  }}
                   secureTextEntry={!showPassword}
                   autoCapitalize="none"
                   autoCorrect={false}
-                  editable={!isLoading}
+                  editable={!isLoading && !isLoadingGoogle}
+                  autoComplete={isLogin ? 'password' : 'password-new'}
                 />
                 <TouchableOpacity
                   style={styles.eyeIcon}
@@ -135,26 +197,60 @@ export default function AuthScreen() {
                 </TouchableOpacity>
               </View>
 
+              {error ? (
+                <Text style={styles.errorText}>{error}</Text>
+              ) : null}
+
               <TouchableOpacity
-                style={[styles.submitButton, isLoading && styles.submitButtonDisabled]}
+                style={[styles.submitButton, (isLoading || isLoadingGoogle) && styles.submitButtonDisabled]}
                 onPress={handleSubmit}
-                disabled={isLoading}
+                disabled={isLoading || isLoadingGoogle}
               >
                 <LinearGradient
-                  colors={isLoading ? ['#333333', '#333333'] : ['#29202b', '#8B5CF6', '#7C3AED']}
+                  colors={(isLoading || isLoadingGoogle) ? ['#333333', '#333333'] : ['#29202b', '#8B5CF6', '#7C3AED']}
                   style={styles.submitButtonGradient}
                 >
-                  <Text style={styles.submitButtonText}>
-                    {isLoading ? 'Please wait...' : (isLogin ? 'Sign In' : 'Create Account')}
-                  </Text>
+                  {isLoading ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.submitButtonText}>
+                      {isLogin ? 'Sign In' : 'Create Account'}
+                    </Text>
+                  )}
                 </LinearGradient>
+              </TouchableOpacity>
+
+              <View style={styles.dividerContainer}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>OR</Text>
+                <View style={styles.dividerLine} />
+              </View>
+
+              {/* Google Sign In Button */}
+              <TouchableOpacity
+                style={[styles.googleButton, (isLoading || isLoadingGoogle) && styles.googleButtonDisabled]}
+                onPress={handleGoogleSignIn}
+                disabled={isLoading || isLoadingGoogle}
+              >
+                {isLoadingGoogle ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <>
+                    <View style={styles.googleIcon}>
+                      <Text style={styles.googleIconText}>G</Text>
+                    </View>
+                    <Text style={styles.googleButtonText}>
+                      {isLogin ? 'Sign in with Google' : 'Sign up with Google'}
+                    </Text>
+                  </>
+                )}
               </TouchableOpacity>
 
               <View style={styles.switchContainer}>
                 <Text style={styles.switchText}>
                   {isLogin ? "Don't have an account?" : 'Already have an account?'}
                 </Text>
-                <TouchableOpacity onPress={() => setIsLogin(!isLogin)} disabled={isLoading}>
+                <TouchableOpacity onPress={toggleMode} disabled={isLoading || isLoadingGoogle}>
                   <Text style={styles.switchLink}>
                     {isLogin ? 'Sign Up' : 'Sign In'}
                   </Text>
@@ -244,10 +340,17 @@ const styles = StyleSheet.create({
   eyeIcon: {
     padding: 8,
   },
+  errorText: {
+    color: '#FF6B6B',
+    fontSize: 14,
+    marginBottom: 16,
+    textAlign: 'center' as const,
+  },
   submitButton: {
     borderRadius: 24,
     overflow: 'hidden',
     marginTop: 8,
+    marginBottom: 16,
   },
   submitButtonDisabled: {
     opacity: 0.6,
@@ -255,10 +358,63 @@ const styles = StyleSheet.create({
   submitButtonGradient: {
     paddingVertical: 18,
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 56,
   },
   submitButtonText: {
     fontSize: 18,
     fontWeight: '700' as const,
+    color: '#FFFFFF',
+  },
+  dividerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 24,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#2D2D2D',
+  },
+  dividerText: {
+    color: '#666666',
+    fontSize: 14,
+    marginHorizontal: 16,
+    fontWeight: '600' as const,
+  },
+  googleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1A1A1A',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#2D2D2D',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    marginBottom: 24,
+    minHeight: 56,
+  },
+  googleButtonDisabled: {
+    opacity: 0.6,
+  },
+  googleIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  googleIconText: {
+    fontSize: 14,
+    fontWeight: 'bold' as const,
+    color: '#4285F4',
+  },
+  googleButtonText: {
+    fontSize: 16,
+    fontWeight: '600' as const,
     color: '#FFFFFF',
   },
   switchContainer: {

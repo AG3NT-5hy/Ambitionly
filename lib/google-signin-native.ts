@@ -104,7 +104,8 @@ export async function signOutFromGoogle() {
  */
 export async function isSignedInWithGoogle(): Promise<boolean> {
   try {
-    return await GoogleSignin.isSignedIn();
+    const user = await GoogleSignin.getCurrentUser();
+    return user !== null;
   } catch (error) {
     return false;
   }

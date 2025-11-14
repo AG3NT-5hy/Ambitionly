@@ -13,6 +13,7 @@ import { AmbitionProvider } from "../hooks/ambition-store";
 import { SubscriptionProvider } from "../hooks/subscription-store";
 import { UserProvider } from "../hooks/user-store";
 import { UnifiedUserProvider } from "../lib/unified-user-store";
+import { AuthProvider } from "../hooks/auth-store";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { LicenseChecker } from "../components/LicenseChecker";
 import { trpc, trpcClient } from "../lib/trpc";
@@ -107,6 +108,8 @@ function RootLayoutNav() {
     <Stack screenOptions={stackScreenOptions}>
       <Stack.Screen name="index" />
       <Stack.Screen name="welcome" />
+      <Stack.Screen name="login" />
+      <Stack.Screen name="auth" />
       <Stack.Screen name="onboarding" />
       <Stack.Screen name="questions" />
       <Stack.Screen name="generating" />
@@ -180,14 +183,7 @@ export default function RootLayout() {
   }, []);
 
   if (!isReady) {
-    return (
-      <View style={{ flex: 1, backgroundColor: '#000000' }}>
-        <LinearGradient
-          colors={['#000000', '#29202B', '#000000']}
-          style={StyleSheet.absoluteFillObject}
-        />
-      </View>
-    );
+    return null; // Return null to show native splash screen
   }
 
   return (
@@ -196,19 +192,21 @@ export default function RootLayout() {
         <trpc.Provider client={trpcClient} queryClient={queryClient}>
           <QueryClientProvider client={queryClient}>
             <UiProvider>
-              <UnifiedUserProvider>
-                <UserProvider>
-                  <SubscriptionProvider>
-                    <AmbitionProvider>
-                      <LicenseChecker>
-                        <StatusBar style="light" />
-                        <RootLayoutNav />
-                        <UiLayer />
-                      </LicenseChecker>
-                    </AmbitionProvider>
-                  </SubscriptionProvider>
-                </UserProvider>
-              </UnifiedUserProvider>
+              <AuthProvider>
+                <UnifiedUserProvider>
+                  <UserProvider>
+                    <SubscriptionProvider>
+                      <AmbitionProvider>
+                        <LicenseChecker>
+                          <StatusBar style="light" />
+                          <RootLayoutNav />
+                          <UiLayer />
+                        </LicenseChecker>
+                      </AmbitionProvider>
+                    </SubscriptionProvider>
+                  </UserProvider>
+                </UnifiedUserProvider>
+              </AuthProvider>
             </UiProvider>
           </QueryClientProvider>
         </trpc.Provider>

@@ -17,9 +17,8 @@ export default function SplashScreen() {
   const animatedValue = useRef(new Animated.Value(0)).current;
   const fadeValue = useRef(new Animated.Value(0)).current;
   
-  // Image URIs
-  const imageUri = 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/hh7r1htr39t6bzf7t6c4i';
-  const fallbackUri = 'https://via.placeholder.com/200x200/29202B/FFFFFF?text=Logo';
+  // Local logo asset
+  const logoSource = require('../assets/images/logo-main.png');
 
   useEffect(() => {
     // Start background animation
@@ -46,27 +45,10 @@ export default function SplashScreen() {
       useNativeDriver: true,
     }).start();
 
-    // Preload the image with timeout
-    const imageTimeout = setTimeout(() => {
-      setImageLoaded(true);
-    }, 2000); // Fallback after 2 seconds
-    
-    // Validate URI before prefetching
-    if (imageUri && imageUri.trim() !== '') {
-      Image.prefetch(imageUri).then(() => {
-        clearTimeout(imageTimeout);
-        setImageLoaded(true);
-      }).catch(() => {
-        clearTimeout(imageTimeout);
-        setImageLoaded(true);
-      });
-    } else {
-      clearTimeout(imageTimeout);
-      setImageLoaded(true);
-    }
+    // Local asset loads immediately, no prefetch needed
+    setImageLoaded(true);
     
     return () => {
-      clearTimeout(imageTimeout);
       backgroundAnimation.stop();
     };
   }, [animatedValue, fadeValue]);
@@ -146,15 +128,10 @@ export default function SplashScreen() {
           >
             {imageLoaded && (
               <Image
-                source={{ 
-                  uri: imageUri || fallbackUri
-                }}
+                source={logoSource}
                 style={styles.logoImage}
                 resizeMode="contain"
                 accessibilityLabel="Ambitionly logo"
-                onError={(error) => {
-                  console.warn('Image failed to load:', error.nativeEvent.error);
-                }}
               />
             )}
           </Animated.View>

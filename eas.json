@@ -8,20 +8,26 @@
       "developmentClient": true,
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_RORK_API_BASE_URL": "http://localhost:3000"
+        "EXPO_PUBLIC_RORK_API_BASE_URL": "https://ambitionly.onrender.com",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://ysmcmlduiokkfcbohxjl.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlzbWNtbGR1aW9ra2ZjYm9oeGpsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE0MDU4NjIsImV4cCI6MjA3Njk4MTg2Mn0.3fZYcejS5xXYhCGL7RtjEhFP-cMF543jKXBtyYQHPJE"
       }
     },
     "preview": {
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_RORK_API_BASE_URL": "https://ambitionly.onrender.com"
+        "EXPO_PUBLIC_RORK_API_BASE_URL": "https://ambitionly.onrender.com",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://ysmcmlduiokkfcbohxjl.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlzbWNtbGR1aW9ra2ZjYm9oeGpsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE0MDU4NjIsImV4cCI6MjA3Njk4MTg2Mn0.3fZYcejS5xXYhCGL7RtjEhFP-cMF543jKXBtyYQHPJE"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
         "NODE_ENV": "production",
-        "EXPO_PUBLIC_RORK_API_BASE_URL": "https://ambitionly.onrender.com"
+        "EXPO_PUBLIC_RORK_API_BASE_URL": "https://ambitionly.onrender.com",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://ysmcmlduiokkfcbohxjl.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlzbWNtbGR1aW9ra2ZjYm9oeGpsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE0MDU4NjIsImV4cCI6MjA3Njk4MTg2Mn0.3fZYcejS5xXYhCGL7RtjEhFP-cMF543jKXBtyYQHPJE"
       },
       "cache": {
         "disabled": false
@@ -37,7 +43,9 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_RORK_API_BASE_URL": "https://ambitionly.onrender.com"
+        "EXPO_PUBLIC_RORK_API_BASE_URL": "https://ambitionly.onrender.com",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://ysmcmlduiokkfcbohxjl.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlzbWNtbGR1aW9ra2ZjYm9oeGpsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE0MDU4NjIsImV4cCI6MjA3Njk4MTg2Mn0.3fZYcejS5xXYhCGL7RtjEhFP-cMF543jKXBtyYQHPJE"
       }
     }
   },

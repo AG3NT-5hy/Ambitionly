@@ -6,17 +6,39 @@ import { emailStorageService } from '../../../../../lib/email-storage'
 export const getEmailsProcedure = publicProcedure
   .query(async () => {
     try {
-      const emails = emailStorageService.getAllEmails();
-      const stats = emailStorageService.getStats();
+      const [emails, stats] = await Promise.all([
+        emailStorageService.getAllEmails(),
+        emailStorageService.getStats(),
+      ]);
+      
+      console.log(`[Admin Emails] Returning ${emails.length} emails, stats:`, stats);
       
       return {
-        emails,
-        stats,
+        emails: emails || [],
+        stats: stats || {
+          total: 0,
+          unique: 0,
+          signups: 0,
+          logins: 0,
+          lastUpdated: null
+        },
         success: true
       };
     } catch (error) {
       console.error('[Admin Emails] Failed to get emails:', error);
-      throw new Error('Failed to retrieve emails');
+      // Return empty data instead of throwing to prevent UI errors
+      return {
+        emails: [],
+        stats: {
+          total: 0,
+          unique: 0,
+          signups: 0,
+          logins: 0,
+          lastUpdated: null
+        },
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to retrieve emails'
+      };
     }
   });
 
@@ -29,9 +51,9 @@ export const exportEmailsProcedure = publicProcedure
       let content: string;
       
       if (input.format === 'csv') {
-        content = emailStorageService.exportEmailsAsCSV();
+        content = await emailStorageService.exportEmailsAsCSV();
       } else {
-        content = emailStorageService.exportEmailsAsText();
+        content = await emailStorageService.exportEmailsAsText();
       }
       
       return {
@@ -48,7 +70,7 @@ export const exportEmailsProcedure = publicProcedure
 export const clearEmailsProcedure = publicProcedure
   .mutation(async () => {
     try {
-      emailStorageService.clearEmails();
+      await emailStorageService.clearEmails();
       
       return {
         success: true,
@@ -63,7 +85,7 @@ export const clearEmailsProcedure = publicProcedure
 export const getEmailStatsProcedure = publicProcedure
   .query(async () => {
     try {
-      const stats = emailStorageService.getStats();
+      const stats = await emailStorageService.getStats();
       
       return {
         stats,

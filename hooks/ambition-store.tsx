@@ -260,9 +260,12 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     };
   }, [isHydrated]);
 
-  // Monitor timer completion and send notifications (fallback for foreground only)
+  // Monitor timer completion and send fallback notifications ONLY when:
+  // 1. Timer has actually completed (elapsed time >= required duration)
+  // 2. Scheduled notification failed (notificationId is null/undefined/not active)
+  // 3. We haven't already sent a fallback notification for this timer instance
   // Note: Primary notifications are scheduled when timers start and work in background
-  // This is only a fallback in case scheduled notifications fail
+  // This fallback is ONLY for cases where the scheduled notification failed
   useEffect(() => {
     if (!isHydrated || !roadmap) return;
 
@@ -272,48 +275,52 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
 
         const wasComplete = previousTimerStates.current.get(timer.taskId) || false;
         const isNowComplete = isTaskTimerComplete(timer.taskId);
-        const notificationKey = `${timer.taskId}-${timer.startTime}`;
+        const notificationKey = `fallback-${timer.taskId}-${timer.startTime}`;
         
         // Calculate elapsed time to ensure timer has actually been running
         const elapsed = Date.now() - timer.startTime;
-        const minimumElapsed = 5000; // At least 5 seconds must have passed (prevents immediate triggers)
         const requiredDuration = timer.duration * 60 * 1000; // Required duration in milliseconds
-
+        
         // Only send fallback notification if:
         // 1. Timer just completed (transitioned from not complete to complete)
-        // 2. We haven't sent a notification for this timer instance
-        // 3. No notification was scheduled (notificationId is null/undefined)
-        // 4. Timer has been running for at least 5 seconds (prevents immediate triggers)
-        // 5. Timer has actually run for the full required duration (prevents premature triggers)
+        // 2. We haven't sent a fallback notification for this timer instance
+        // 3. No notification was scheduled (notificationId is null/undefined) OR scheduled notification failed
+        // 4. Timer has actually run for the full required duration (no premature triggers)
         if (!wasComplete && isNowComplete && 
             !notificationSentRef.current.has(notificationKey) &&
-            !timer.notificationId &&
-            elapsed >= minimumElapsed &&
-            elapsed >= requiredDuration * 0.95) { // Allow 5% tolerance for timing
-          console.log(`[Notifications] Timer completed for task ${timer.taskId} - sending fallback notification (scheduled notification may have failed)`);
+            elapsed >= requiredDuration * 0.98) { // Allow 2% tolerance for timing
           
-          // Find the task title for the notification
-          let taskTitle = 'Task';
-          if (roadmap?.phases) {
-            for (const phase of roadmap.phases) {
-              for (const milestone of phase.milestones) {
-                const task = milestone.tasks.find(t => t.id === timer.taskId);
-                if (task) {
-                  taskTitle = task.title;
-                  break;
+          // Only send fallback if no notification was scheduled (scheduling failed)
+          // If notificationId exists, we assume the scheduled notification will fire
+          // The fallback is only for cases where scheduling failed from the start
+          if (!timer.notificationId) {
+            console.log(`[Notifications] Timer completed for task ${timer.taskId} - no notification was scheduled, sending fallback notification`);
+            
+            // Find the task title for the notification
+            let taskTitle = 'Task';
+            if (roadmap?.phases) {
+              for (const phase of roadmap.phases) {
+                for (const milestone of phase.milestones) {
+                  const task = milestone.tasks.find(t => t.id === timer.taskId);
+                  if (task) {
+                    taskTitle = task.title || 'Task';
+                    break;
+                  }
                 }
+                if (taskTitle !== 'Task') break;
               }
-              if (taskTitle !== 'Task') break;
             }
-          }
 
-          // Send immediate notification as fallback
-          NotificationService.scheduleTaskCompleteNotification(taskTitle);
-          
-          // Mark notification as sent for this timer instance
-          notificationSentRef.current.add(notificationKey);
-          
-          console.log(`[Notifications] Fallback notification sent for completed task: ${taskTitle}`);
+            // Send immediate notification as fallback (ONLY when timer has actually completed)
+            NotificationService.sendImmediateNotification(taskTitle, timer.taskId);
+            
+            // Mark fallback notification as sent for this timer instance
+            notificationSentRef.current.add(notificationKey);
+            
+            console.log(`[Notifications] ✅ Fallback notification sent for completed task: ${taskTitle}`);
+          } else {
+            console.log(`[Notifications] Timer completed for task ${timer.taskId} - scheduled notification (ID: ${timer.notificationId}) should fire`);
+          }
         }
 
         // Update previous state
@@ -321,11 +328,8 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
       });
     };
 
-    // Check immediately
-    checkTimerCompletion();
-
-    // Set up interval to check every second (only for fallback)
-    const interval = setInterval(checkTimerCompletion, 1000);
+    // Check every 2 seconds (less frequent to reduce overhead)
+    const interval = setInterval(checkTimerCompletion, 2000);
 
     return () => {
       clearInterval(interval);
@@ -893,10 +897,20 @@ Output ONLY valid JSON in this exact format:
 
     // Schedule notification for when timer completes (in seconds)
     const durationInSeconds = duration * 60;
-    const notificationId = await NotificationService.scheduleTaskCompleteNotification(
-      taskTitle,
-      durationInSeconds
-    );
+    
+    // Validate duration before scheduling - must be at least 5 seconds
+    let notificationId: string | null = null;
+    if (durationInSeconds >= 5 && !isNaN(durationInSeconds) && isFinite(durationInSeconds)) {
+      console.log(`[Timer] Scheduling notification for ${durationInSeconds} seconds (${duration} minutes)`);
+      notificationId = await NotificationService.scheduleTaskCompleteNotification(taskTitle, durationInSeconds, taskId);
+      if (notificationId) {
+        console.log(`[Timer] ✅ Notification scheduled successfully with ID: ${notificationId}`);
+      } else {
+        console.warn(`[Timer] ⚠️ Failed to schedule notification - fallback will be used when timer completes`);
+      }
+    } else {
+      console.error(`[Timer] Invalid duration: ${durationInSeconds} seconds (from ${duration} minutes). Cannot schedule notification. Minimum is 5 seconds.`);
+    }
 
     const newTimer: TaskTimer = {
       taskId,

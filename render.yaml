@@ -3,12 +3,17 @@ services:
     name: ambitionly-backend
     env: node
     plan: free
-    nodeVersion: 18
     buildCommand: npm install && npm run build
     startCommand: npx tsx --tsconfig backend/tsconfig.json server.ts
     envVars:
       - key: DATABASE_URL
-        sync: false
+        value: postgresql://postgres.ysmcmlduiokkfcbohxjl:%40%266A%25_-.cysyAZ3@aws-1-ap-southeast-1.pooler.supabase.com:5432/postgres
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlzbWNtbGR1aW9ra2ZjYm9oeGpsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MTQwNTg2MiwiZXhwIjoyMDc2OTgxODYyfQ.qwX-iMql4mCP9NRiSDRl10oedMe0rgLpWF1sZeNlMKg
+      - key: EXPO_PUBLIC_SUPABASE_URL
+        value: https://ysmcmlduiokkfcbohxjl.supabase.co
+      - key: EXPO_PUBLIC_SUPABASE_ANON_KEY
+        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlzbWNtbGR1aW9ra2ZjYm9oeGpsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE0MDU4NjIsImV4cCI6MjA3Njk4MTg2Mn0.3fZYcejS5xXYhCGL7RtjEhFP-cMF543jKXBtyYQHPJE
       - key: PORT
         value: 3000
       - key: NODE_ENV

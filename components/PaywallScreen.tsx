@@ -415,7 +415,42 @@ export default function PaywallScreen({ onClose, onSubscribe }: PaywallScreenPro
         try {
           const offerings = await Purchases.getOfferings();
           if (offerings.current && offerings.current.availablePackages.length > 0) {
-            setPackages(offerings.current.availablePackages);
+            // Sort packages: Annual first, Monthly second, Lifetime third
+            const sortedPackages = offerings.current.availablePackages.sort((a, b) => {
+              const getOrder = (pkg: any) => {
+                const type = pkg.packageType?.toString().toLowerCase() || '';
+                if (type.includes('annual') || type.includes('year')) return 0;
+                if (type.includes('month')) return 1;
+                if (type.includes('lifetime') || type.includes('forever')) return 2;
+                return 3;
+              };
+              return getOrder(a) - getOrder(b);
+            });
+            
+            // Update descriptions for better display
+            const packagesWithDescriptions = sortedPackages.map((pkg, index) => {
+              const type = pkg.packageType?.toString().toLowerCase() || '';
+              let description = pkg.product.description || "Premium features included";
+              
+              // Override descriptions based on package type
+              if (type.includes('annual') || type.includes('year')) {
+                description = 'Save 28%, only $10/ Month';
+              } else if (type.includes('lifetime') || type.includes('forever')) {
+                description = 'Save 10%, • Pay once, own forever';
+              } else if (type.includes('month')) {
+                description = 'Cancel anytime';
+              }
+              
+              return {
+                ...pkg,
+                product: {
+                  ...pkg.product,
+                  description: description,
+                }
+              };
+            });
+            
+            setPackages(packagesWithDescriptions);
             setIsLoadingProducts(false);
             return;
           }
@@ -424,6 +459,7 @@ export default function PaywallScreen({ onClose, onSubscribe }: PaywallScreenPro
         }
         
         // Fallback: Use mock packages when RevenueCat is not available
+        // Ordered: Annual (yearly) first, Monthly second, Lifetime third
         const mockPackages = [
           {
             identifier: 'annual',
@@ -431,7 +467,7 @@ export default function PaywallScreen({ onClose, onSubscribe }: PaywallScreenPro
             product: {
               identifier: 'ambitionly_annual',
               title: 'Annual Plan',
-              description: 'Save 28% • Only $10/month',
+              description: 'Save 28%, only $10/ Month',
               priceString: '$120.90/year',
             }
           },
@@ -451,7 +487,7 @@ export default function PaywallScreen({ onClose, onSubscribe }: PaywallScreenPro
             product: {
               identifier: 'ambitionly_lifetime',
               title: 'Lifetime Access',
-              description: 'Save 10% • Pay once, own forever',
+              description: 'Save 10%, • Pay once, own forever',
               priceString: '$220 once',
             }
           }
@@ -1012,11 +1048,9 @@ export default function PaywallScreen({ onClose, onSubscribe }: PaywallScreenPro
                   style={styles.heroIcon}
                 >
                   <Image 
-                    source={{ uri: 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/yfrmwtybagkv41hskw4hn' }}
+                    source={require('../assets/images/logo-paywall.png')}
                     style={styles.logoImage}
                     contentFit="contain"
-                    cachePolicy="memory-disk"
-                    priority="high"
                     transition={200}
                   />
                 </LinearGradient>
@@ -1303,14 +1337,28 @@ export default function PaywallScreen({ onClose, onSubscribe }: PaywallScreenPro
                 ))
               ) : (
                 <View style={styles.fallbackContainer}>
-                  <PlanCard
-                    plan="annual"
-                    title="Annual Plan"
-                    price="$120.90/year"
-                    subtitle="Save 28% • Only $10/month"
-                    isPopular={true}
-                  />
+                  {/* Yearly plan first - encouraged */}
+                  <View>
+                    <PlanCard
+                      plan="annual"
+                      title="Annual Plan"
+                      price="$120.90/year"
+                      subtitle="Save 28%, only $10/ Month"
+                      isPopular={true}
+                    />
+                    <View style={styles.valueIndicators}>
+                      <View style={styles.valueIndicator}>
+                        <Clock size={12} color="#00E6E6" />
+                        <Text style={styles.valueText}>Best Value</Text>
+                      </View>
+                      <View style={styles.valueIndicator}>
+                        <Heart size={12} color="#FF6B35" />
+                        <Text style={styles.valueText}>Most Loved</Text>
+                      </View>
+                    </View>
+                  </View>
                   
+                  {/* Monthly plan second */}
                   <PlanCard
                     plan="monthly"
                     title="Monthly Plan"
@@ -1318,11 +1366,12 @@ export default function PaywallScreen({ onClose, onSubscribe }: PaywallScreenPro
                     subtitle="Cancel anytime"
                   />
                   
+                  {/* Lifetime plan last */}
                   <PlanCard
                     plan="lifetime"
                     title="Lifetime Access"
                     price="$220 once"
-                    subtitle="Save 10% • Pay once, own forever"
+                    subtitle="Save 10%, • Pay once, own forever"
                   />
                 </View>
               )}
@@ -1355,7 +1404,7 @@ export default function PaywallScreen({ onClose, onSubscribe }: PaywallScreenPro
                   >
                     <Zap size={20} color="#FFFFFF" />
                     <Text style={styles.purchaseButtonText}>
-                      {purchaseCompleted ? "Start Your Journey" : `Purchase ${selectedPlan} Plan`}
+                      {purchaseCompleted ? "Start Your Journey" : `Purchase ${selectedPlan === 'annual' ? 'annual' : selectedPlan === 'monthly' ? 'monthly' : 'lifetime'} Plan`}
                     </Text>
                     
                     {/* Static arrow */}

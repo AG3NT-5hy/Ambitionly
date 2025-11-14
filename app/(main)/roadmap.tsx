@@ -41,7 +41,7 @@ export default function RoadmapScreen() {
     });
   }, [roadmap]);
   const { shouldShowPaywall } = useSubscription();
-  const { isRegistered, signUp, signIn } = useUnifiedUser();
+  const { isRegistered, signUp, signIn, signInWithGoogle } = useUnifiedUser();
   const { showToast } = useUi();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
@@ -90,6 +90,47 @@ export default function RoadmapScreen() {
   const progress = getProgress();
   const streak = getStreak();
   const shouldShowPaywallNow = shouldShowPaywall(completedTasks.length);
+
+  const handleGoogleSignup = useCallback(async () => {
+    try {
+      const success = await signInWithGoogle();
+      if (!success) {
+        return false;
+      }
+
+      setShowSignUpModal(false);
+      showToast('Welcome! Your progress is now saved.', 'success');
+
+      if (shouldShowPaywallNow && !paywallDismissed) {
+        setTimeout(() => {
+          setShowPaywallModal(true);
+        }, 500);
+      }
+
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Google sign up failed';
+      showToast(message, 'error');
+      throw new Error(message);
+    }
+  }, [signInWithGoogle, showToast, shouldShowPaywallNow, paywallDismissed]);
+
+  const handleGoogleSignin = useCallback(async () => {
+    try {
+      const success = await signInWithGoogle();
+      if (!success) {
+        return false;
+      }
+
+      setShowSignUpModal(false);
+      showToast('Welcome back! Your data has been synced.', 'success');
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Google sign in failed';
+      showToast(message, 'error');
+      throw new Error(message);
+    }
+  }, [signInWithGoogle, showToast]);
 
   // Show sign-up modal on first visit if user hasn't signed up
   useEffect(() => {
@@ -556,6 +597,8 @@ export default function RoadmapScreen() {
               throw error;
             }
           }}
+          onSignUpWithGoogle={handleGoogleSignup}
+          onSignInWithGoogle={handleGoogleSignin}
         />
       </Modal>
     </LinearGradient>

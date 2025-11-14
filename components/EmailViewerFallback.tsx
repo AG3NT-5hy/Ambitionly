@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Share, Platform } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { COLORS } from '../constants';
 import { trpc } from '../lib/trpc';
-import { Mail, Download, Trash2, Filter, RefreshCw, User, Clock, SignIn, UserPlus } from 'lucide-react-native';
+import { Mail, Download, Trash2, Filter, RefreshCw, User, Clock, SignIn, UserPlus, Copy, Check } from 'lucide-react-native';
 
 type EmailRecord = {
   email: string;
@@ -16,8 +17,14 @@ type FilterType = 'all' | 'signup' | 'login';
 export default function EmailViewerFallback() {
   const [filter, setFilter] = useState<FilterType>('all');
   const [sortBy, setSortBy] = useState<'timestamp' | 'email'>('timestamp');
+  const [copiedEmail, setCopiedEmail] = useState<string | null>(null);
 
-  const { data, isLoading, error, refetch } = trpc.admin.emails.get.useQuery();
+  const { data, isLoading, error, refetch } = trpc.admin.emails.get.useQuery(undefined, {
+    retry: 2,
+    retryDelay: 1000,
+    refetchOnMount: true,
+    refetchOnWindowFocus: false,
+  });
   const exportMutation = trpc.admin.emails.export.useMutation();
   const clearMutation = trpc.admin.emails.clear.useMutation();
 
@@ -47,13 +54,16 @@ export default function EmailViewerFallback() {
       const result = await exportMutation.mutateAsync({ format });
       if (result.content) {
         if (Platform.OS === 'web') {
-          const blob = new Blob([result.content], { type: format === 'csv' ? 'text/csv' : 'text/plain' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `collected-emails-${new Date().toISOString().split('T')[0]}.${format === 'csv' ? 'csv' : 'txt'}`;
-          a.click();
-          URL.revokeObjectURL(url);
+          // Web-specific code - TypeScript will check this at compile time
+          if (typeof Blob !== 'undefined' && typeof URL !== 'undefined' && typeof document !== 'undefined') {
+            const blob = new Blob([result.content], { type: format === 'csv' ? 'text/csv' : 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `collected-emails-${new Date().toISOString().split('T')[0]}.${format === 'csv' ? 'csv' : 'txt'}`;
+            a.click();
+            URL.revokeObjectURL(url);
+          }
         } else {
           await Share.share({
             message: result.content,
@@ -94,6 +104,17 @@ export default function EmailViewerFallback() {
     return date.toLocaleString();
   };
 
+  const handleCopyEmail = async (email: string) => {
+    try {
+      await Clipboard.setStringAsync(email);
+      setCopiedEmail(email);
+      // Reset the copied state after 2 seconds
+      setTimeout(() => setCopiedEmail(null), 2000);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to copy email to clipboard');
+    }
+  };
+
   if (isLoading) {
     return (
       <View style={styles.centerContainer}>
@@ -104,14 +125,28 @@ export default function EmailViewerFallback() {
   }
 
   if (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    // Safely extract error message
+    let errorMessage = 'Unknown error';
+    if (error instanceof Error) {
+      errorMessage = error.message;
+    } else if (error && typeof error === 'object') {
+      const err = error as any;
+      errorMessage = err.data?.message || err.message || 'Unknown error';
+    }
+    
     const apiUrl = process.env.EXPO_PUBLIC_RORK_API_BASE_URL || 'http://localhost:3000';
+    const httpStatus = error && typeof error === 'object' ? (error as any).data?.httpStatus : undefined;
     
     return (
       <View style={styles.centerContainer}>
         <Text style={styles.errorText}>Failed to load emails</Text>
         <Text style={styles.errorDetail}>{errorMessage}</Text>
         <Text style={styles.errorDetail}>API URL: {apiUrl}</Text>
+        {httpStatus && (
+          <Text style={styles.errorDetail}>
+            HTTP Status: {httpStatus}
+          </Text>
+        )}
         <TouchableOpacity style={styles.retryButton} onPress={() => refetch()}>
           <RefreshCw size={16} color={COLORS.PRIMARY} />
           <Text style={styles.retryButtonText}>Retry</Text>
@@ -233,7 +268,7 @@ export default function EmailViewerFallback() {
             <Text style={styles.emptyStateText}>No emails found</Text>
             <Text style={styles.emptyStateSubtext}>
               {filter !== 'all' ? `Try changing the filter` : 'No emails have been collected yet'}
-            </Text>
+        </Text>
           </View>
         ) : (
           filteredEmails.map((email, index) => (
@@ -247,7 +282,19 @@ export default function EmailViewerFallback() {
                   )}
                 </View>
                 <View style={styles.emailInfo}>
-                  <Text style={styles.emailAddress}>{email.email}</Text>
+                  <View style={styles.emailAddressRow}>
+                    <Text style={styles.emailAddress}>{email.email}</Text>
+                    <TouchableOpacity
+                      style={styles.copyButton}
+                      onPress={() => handleCopyEmail(email.email)}
+                    >
+                      {copiedEmail === email.email ? (
+                        <Check size={16} color={COLORS.SUCCESS} />
+                      ) : (
+                        <Copy size={16} color={COLORS.PRIMARY} />
+                      )}
+                    </TouchableOpacity>
+                  </View>
                   <View style={styles.emailMeta}>
                     <View style={styles.emailMetaItem}>
                       <User size={12} color={COLORS.TEXT_MUTED} />
@@ -262,7 +309,7 @@ export default function EmailViewerFallback() {
                 <View style={[styles.sourceBadge, email.source === 'signup' ? styles.sourceBadgeSignup : styles.sourceBadgeLogin]}>
                   <Text style={styles.sourceBadgeText}>
                     {email.source === 'signup' ? 'Signup' : 'Login'}
-                  </Text>
+        </Text>
                 </View>
               </View>
             </View>
@@ -470,11 +517,25 @@ const styles = StyleSheet.create({
   emailInfo: {
     flex: 1,
   },
+  emailAddressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
   emailAddress: {
     color: COLORS.TEXT_PRIMARY,
     fontSize: 16,
     fontWeight: '600',
-    marginBottom: 8,
+    flex: 1,
+    marginRight: 8,
+  },
+  copyButton: {
+    padding: 6,
+    borderRadius: 6,
+    backgroundColor: COLORS.SURFACE,
+    borderWidth: 1,
+    borderColor: COLORS.BORDER,
   },
   emailMeta: {
     flexDirection: 'row',
