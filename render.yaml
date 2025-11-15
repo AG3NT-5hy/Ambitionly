@@ -5,16 +5,13 @@ services:
     plan: free
     buildCommand: npm install && npx prisma generate && npx prisma migrate deploy || npx prisma db push
     startCommand: npx tsx --tsconfig backend/tsconfig.json server.ts
-    # Environment variables should be set in Render Dashboard, not here
-    # Go to: Render Dashboard > Your Service > Environment > Add Environment Variable
-    # Required environment variables:
+    # Sensitive environment variables should be set in Render Dashboard
+    # Go to: Dashboard > Your Service > Environment > Add Environment Variable
+    # Required variables:
     # - DATABASE_URL (PostgreSQL connection string)
-    # - SUPABASE_SERVICE_ROLE_KEY (Supabase service role JWT - KEEP SECRET!)
-    # - API_URL (e.g., https://ambitionly.onrender.com)
+    # - SUPABASE_SERVICE_ROLE_KEY (Supabase Service Role JWT - KEEP SECRET!)
+    # - EXPO_PUBLIC_SUPABASE_ANON_KEY (Supabase Anon Key JWT - KEEP SECRET!)
     # - EXPO_PUBLIC_SUPABASE_URL (Supabase project URL)
-    # - EXPO_PUBLIC_SUPABASE_ANON_KEY (Supabase anon key - public but set via env)
-    # - PORT (default: 3000)
-    # - NODE_ENV (production)
     envVars:
       - key: API_URL
         value: https://ambitionly.onrender.com
