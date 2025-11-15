@@ -6,11 +6,33 @@ import registerEmailsApi from "./api/emails";
 
 // Workaround for tsx runtime: use require for CommonJS compatibility
 const honoModule = require("hono");
-const Hono = honoModule.Hono || honoModule.default?.Hono || honoModule.default || honoModule;
+// Try multiple ways to extract Hono class
+let Hono: any = honoModule.Hono;
+if (!Hono || typeof Hono !== 'function') {
+  Hono = honoModule.default?.Hono;
+}
+if (!Hono || typeof Hono !== 'function') {
+  Hono = honoModule.default;
+}
+if (!Hono || typeof Hono !== 'function') {
+  // If module itself is an object, try to find Hono in it
+  const keys = Object.keys(honoModule);
+  console.log('[Hono] Module keys:', keys);
+  for (const key of keys) {
+    if (key === 'Hono' || key.toLowerCase().includes('hono')) {
+      const candidate = (honoModule as any)[key];
+      if (typeof candidate === 'function') {
+        Hono = candidate;
+        break;
+      }
+    }
+  }
+}
 
 // app will be mounted at /api
 if (!Hono || typeof Hono !== 'function') {
-  throw new Error(`Failed to load Hono constructor. Type: ${typeof Hono}, Value: ${Hono}`);
+  console.error('[Hono] Module structure:', JSON.stringify(Object.keys(honoModule), null, 2));
+  throw new Error(`Failed to load Hono constructor. Type: ${typeof Hono}, Module keys: ${Object.keys(honoModule).join(', ')}`);
 }
 const app = new Hono();
 
