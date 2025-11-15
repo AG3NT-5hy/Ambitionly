@@ -45,8 +45,8 @@ app.use(
   })
 );
 
-// Mount emails API at /emails
-app.route("/emails", emailsApi);
+// Mount emails API at /api/emails
+app.route("/api/emails", emailsApi);
 
 // Simple health check endpoint
 app.get("/", (c) => {
@@ -60,7 +60,7 @@ app.get("/health", (c) => {
     message: "API is running",
     endpoints: {
       trpc: "/api/trpc",
-      emails: "/emails",
+      emails: "/api/emails",
       signup: "/api/trpc/auth.signup (POST)"
     }
   });
