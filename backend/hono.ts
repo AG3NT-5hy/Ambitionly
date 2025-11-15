@@ -4,35 +4,15 @@ import { appRouter } from "./trpc/app-router"
 import { createContext } from "./trpc/create-context"
 import registerEmailsApi from "./api/emails";
 
-// Workaround for tsx runtime: use require for CommonJS compatibility
-const honoModule = require("hono");
-// Try multiple ways to extract Hono class
-let Hono: any = honoModule.Hono;
-if (!Hono || typeof Hono !== 'function') {
-  Hono = honoModule.default?.Hono;
-}
-if (!Hono || typeof Hono !== 'function') {
-  Hono = honoModule.default;
-}
-if (!Hono || typeof Hono !== 'function') {
-  // If module itself is an object, try to find Hono in it
-  const keys = Object.keys(honoModule);
-  console.log('[Hono] Module keys:', keys);
-  for (const key of keys) {
-    if (key === 'Hono' || key.toLowerCase().includes('hono')) {
-      const candidate = (honoModule as any)[key];
-      if (typeof candidate === 'function') {
-        Hono = candidate;
-        break;
-      }
-    }
-  }
-}
+// Import Hono using namespace import for better tsx compatibility
+import * as HonoNamespace from "hono";
+// Extract Hono class - try named export first, then default
+const Hono = (HonoNamespace as any).Hono || (HonoNamespace as any).default || HonoNamespace;
 
 // app will be mounted at /api
 if (!Hono || typeof Hono !== 'function') {
-  console.error('[Hono] Module structure:', JSON.stringify(Object.keys(honoModule), null, 2));
-  throw new Error(`Failed to load Hono constructor. Type: ${typeof Hono}, Module keys: ${Object.keys(honoModule).join(', ')}`);
+  console.error('[Hono] Namespace keys:', Object.keys(HonoNamespace));
+  throw new Error(`Failed to load Hono constructor. Type: ${typeof Hono}, Namespace keys: ${Object.keys(HonoNamespace).join(', ')}`);
 }
 const app = new Hono();
 
