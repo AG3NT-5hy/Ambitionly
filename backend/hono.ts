@@ -1,16 +1,18 @@
-import HonoModule from "hono";
 import { trpcServer } from "@hono/trpc-server";
 import { cors } from "hono/cors";
 import { appRouter } from "./trpc/app-router"
 import { createContext } from "./trpc/create-context"
 import registerEmailsApi from "./api/emails";
 
+// Workaround for tsx runtime: use require for CommonJS compatibility
+const honoModule = require("hono");
+const Hono = honoModule.Hono || honoModule.default?.Hono || honoModule.default || honoModule;
+
 // app will be mounted at /api
-const HonoCtor = (HonoModule as any)?.Hono ?? HonoModule;
-if (!HonoCtor) {
-  throw new Error("Failed to load Hono constructor from 'hono' package");
+if (!Hono || typeof Hono !== 'function') {
+  throw new Error(`Failed to load Hono constructor. Type: ${typeof Hono}, Value: ${Hono}`);
 }
-const app = new HonoCtor();
+const app = new Hono();
 
 // Enable CORS for all routes
 app.use("*", cors({
