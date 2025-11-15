@@ -59,8 +59,8 @@ if (!isExpoGo) {
   console.log('ℹ️ RevenueCat disabled in Expo Go - requires development build');
 }
 
-// Hide splash screen immediately - index.tsx will be the splash screen
-// Don't prevent auto-hide, let it hide right away
+// Prevent native splash from showing - index.tsx will be the splash screen
+SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -127,9 +127,10 @@ export default function RootLayout() {
   useEffect(() => {
     let isMounted = true;
     
-    // Hide splash screen immediately so index.tsx can be the splash screen
+    // Hide native splash screen immediately so index.tsx can be the splash screen
     const hideSplash = async () => {
       try {
+        // Hide splash immediately before app renders
         await SplashScreen.hideAsync();
         console.log('✅ Native splash screen hidden - showing index.tsx as splash');
       } catch (error) {
@@ -137,7 +138,7 @@ export default function RootLayout() {
       }
     };
     
-    // Hide splash immediately, then prepare app (non-blocking)
+    // Hide splash immediately - this happens synchronously before React renders
     hideSplash();
     
     // Prepare app in background (non-blocking - index.tsx will show immediately)
