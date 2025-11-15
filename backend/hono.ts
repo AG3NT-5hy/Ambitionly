@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import * as HonoNamespace from "hono";
 import { trpcServer } from "@hono/trpc-server";
 import { cors } from "hono/cors";
 import { appRouter } from "./trpc/app-router"
@@ -6,7 +6,11 @@ import { createContext } from "./trpc/create-context"
 import registerEmailsApi from "./api/emails";
 
 // app will be mounted at /api
-const app = new Hono();
+const HonoCtor = (HonoNamespace as any)?.Hono ?? (HonoNamespace as any)?.default;
+if (!HonoCtor) {
+  throw new Error("Failed to load Hono constructor from 'hono' package");
+}
+const app = new HonoCtor();
 
 // Enable CORS for all routes
 app.use("*", cors({
@@ -19,7 +23,7 @@ app.use("*", cors({
 }));
 
 // Add error handling middleware
-app.onError((err, c) => {
+app.onError((err: Error, c: any) => {
   console.error('[Hono] Error:', err);
   return c.json(
     {
@@ -49,12 +53,12 @@ app.use(
 registerEmailsApi(app);
 
 // Simple health check endpoint
-app.get("/", (c) => {
+app.get("/", (c: any) => {
   return c.json({ status: "ok", message: "API is running" });
 });
 
 // Health check for tRPC
-app.get("/health", (c) => {
+app.get("/health", (c: any) => {
   return c.json({ 
     status: "ok", 
     message: "API is running",

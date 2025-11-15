@@ -1,7 +1,5 @@
 import { emailStorageService } from '../../lib/email-storage'
-import type { Hono } from 'hono';
-
-export const registerEmailsApi = (app: Hono) => {
+export const registerEmailsApi = (app: any) => {
   // Get all emails
   app.get('/api/emails', async (c) => {
     try {
