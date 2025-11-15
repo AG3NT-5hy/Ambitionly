@@ -3,35 +3,11 @@ import { httpLink } from "@trpc/client";
 import type { AppRouter } from "../backend/trpc/app-router"
 import superjson from "superjson";
 import { debugService } from "./debug";
+import { config } from "@/config";
 
 export const trpc = createTRPCReact<AppRouter>();
 
-const getBaseUrl = () => {
-  // Try to get from environment variable
-  if (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_RORK_API_BASE_URL) {
-    const url = process.env.EXPO_PUBLIC_RORK_API_BASE_URL.trim();
-    // Use the URL if it's not localhost (localhost won't work on physical devices)
-    if (url && url.length > 0) {
-      if (url.includes('localhost') || url.includes('127.0.0.1')) {
-        console.warn('[tRPC] ⚠️ Localhost URL detected:', url);
-        console.warn('[tRPC] ⚠️ This will not work on physical devices. Use your deployed backend URL or your computer\'s local IP address.');
-        console.warn('[tRPC] ⚠️ Example: http://192.168.1.100:3000 (replace with your computer\'s IP)');
-      }
-      console.log('[tRPC] Using API URL from environment:', url);
-      return url;
-    }
-  }
-
-  // Fallback for development - try to use deployed backend if available
-  // In development, you should set EXPO_PUBLIC_RORK_API_BASE_URL to your Render URL
-  const fallbackUrl = 'https://ambitionly.onrender.com';
-  console.warn('[tRPC] ⚠️ EXPO_PUBLIC_RORK_API_BASE_URL not set, using fallback:', fallbackUrl);
-  console.warn('[tRPC] ⚠️ For development, set EXPO_PUBLIC_RORK_API_BASE_URL in your .env file or eas.json');
-  console.warn('[tRPC] ⚠️ For local testing on physical devices, use your computer\'s local IP (e.g., http://192.168.1.100:3000)');
-  return fallbackUrl;
-};
-
-const baseUrl = getBaseUrl();
+const baseUrl = config.API_URL;
 const trpcUrl = `${baseUrl}/api/trpc`;
 console.log('[tRPC] Initializing client with URL:', trpcUrl);
 

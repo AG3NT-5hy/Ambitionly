@@ -4,6 +4,7 @@ import * as Clipboard from 'expo-clipboard';
 import { COLORS } from '../constants';
 import { trpc } from '../lib/trpc';
 import { Mail, Download, Trash2, Filter, RefreshCw, User, Clock, SignIn, UserPlus, Copy, Check } from 'lucide-react-native';
+import { config } from '@/config';
 
 type EmailRecord = {
   email: string;
@@ -134,7 +135,7 @@ export default function EmailViewerFallback() {
       errorMessage = err.data?.message || err.message || 'Unknown error';
     }
     
-    const apiUrl = process.env.EXPO_PUBLIC_RORK_API_BASE_URL || 'http://localhost:3000';
+    const apiUrl = config.API_URL;
     const httpStatus = error && typeof error === 'object' ? (error as any).data?.httpStatus : undefined;
     
     return (

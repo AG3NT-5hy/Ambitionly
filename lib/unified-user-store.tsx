@@ -16,23 +16,10 @@ import superjson from 'superjson';
 import { collectGuestData, clearGuestData, backupGuestData } from './user-data-migration';
 import { STORAGE_KEYS } from '../constants';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
-
-const getApiBaseUrl = () => {
-  if (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_RORK_API_BASE_URL) {
-    const url = process.env.EXPO_PUBLIC_RORK_API_BASE_URL.trim();
-    if (url && url.length > 0) {
-      if (url.includes('localhost') || url.includes('127.0.0.1')) {
-        console.warn('[UnifiedUser] Localhost API URL detected, using fallback deployment URL instead');
-        return 'https://ambitionly.onrender.com';
-      }
-      return url;
-    }
-  }
-  return 'https://ambitionly.onrender.com';
-};
+import { config } from '../config';
 
 const createBackendClient = () => {
-  const baseUrl = getApiBaseUrl();
+  const baseUrl = config.API_URL;
   return createTRPCProxyClient<AppRouter>({
     transformer: superjson,
     links: [
@@ -192,31 +179,47 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         console.log('[UnifiedUser] No existing account found, creating user record from guest data...');
         guestData = await collectGuestData();
 
-        try {
-          await createUserMutation.mutateAsync({
-            email,
-            name: authUser.user_metadata?.name || authUser.user_metadata?.full_name || null,
-            profilePicture: authUser.user_metadata?.picture || authUser.user_metadata?.avatar_url || null,
-            supabaseId: authUser.id,
-            revenueCatUserId: email,
-            isGuest: false,
-            guestData: {
-              goal: guestData.goal,
-              timeline: guestData.timeline,
-              timeCommitment: guestData.timeCommitment,
-              answers: guestData.answers ? JSON.stringify(guestData.answers) : null,
-              roadmap: guestData.roadmap ? JSON.stringify(guestData.roadmap) : null,
-              completedTasks: Array.isArray(guestData.completedTasks) ? JSON.stringify(guestData.completedTasks) : null,
-              streakData: guestData.streakData ? JSON.stringify(guestData.streakData) : null,
-              taskTimers: guestData.taskTimers ? JSON.stringify(guestData.taskTimers) : null,
-              subscriptionPlan: guestData.subscriptionPlan,
-              subscriptionStatus: guestData.subscriptionStatus,
-              subscriptionExpiresAt: guestData.subscriptionExpiresAt?.toISOString(),
-              subscriptionPurchasedAt: guestData.subscriptionPurchasedAt?.toISOString(),
-            },
-          });
-          createdUser = true;
+        const createPayload = {
+          email,
+          name: authUser.user_metadata?.name || authUser.user_metadata?.full_name || null,
+          profilePicture: authUser.user_metadata?.picture || authUser.user_metadata?.avatar_url || null,
+          supabaseId: authUser.id,
+          revenueCatUserId: email,
+          isGuest: false,
+          guestData: {
+            goal: guestData.goal,
+            timeline: guestData.timeline,
+            timeCommitment: guestData.timeCommitment,
+            answers: guestData.answers ? JSON.stringify(guestData.answers) : null,
+            roadmap: guestData.roadmap ? JSON.stringify(guestData.roadmap) : null,
+            completedTasks: Array.isArray(guestData.completedTasks) ? JSON.stringify(guestData.completedTasks) : null,
+            streakData: guestData.streakData ? JSON.stringify(guestData.streakData) : null,
+            taskTimers: guestData.taskTimers ? JSON.stringify(guestData.taskTimers) : null,
+            subscriptionPlan: guestData.subscriptionPlan,
+            subscriptionStatus: guestData.subscriptionStatus,
+            subscriptionExpiresAt: guestData.subscriptionExpiresAt?.toISOString(),
+            subscriptionPurchasedAt: guestData.subscriptionPurchasedAt?.toISOString(),
+          },
+        };
 
+        try {
+          await createUserMutation.mutateAsync(createPayload);
+          createdUser = true;
+          console.log('[UnifiedUser] ✅ Created user from Google sign-in guest data via mutation');
+        } catch (createError) {
+          console.warn('[UnifiedUser] user.create mutation failed, attempting direct client fallback:', createError);
+          try {
+            await directClient.user.create.mutate(createPayload);
+            createdUser = true;
+            console.log('[UnifiedUser] ✅ Created user from Google sign-in guest data via direct client fallback');
+          } catch (directCreateError) {
+            createdUser = false;
+            console.error('[UnifiedUser] Failed to create user from Google sign-in via direct client:', directCreateError);
+            console.warn('[UnifiedUser] Continuing with local fallback user after Google sign-in failure.');
+          }
+        }
+
+        if (createdUser) {
           try {
             const newUserResult = await directClient.user.get.query({ email });
             if (newUserResult.success && newUserResult.user) {
@@ -225,9 +228,6 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
           } catch (postCreateError) {
             console.warn('[UnifiedUser] Unable to fetch user after creation:', postCreateError);
           }
-        } catch (createError) {
-          console.error('[UnifiedUser] Failed to create user from Google sign-in:', createError);
-          throw new Error('Failed to set up your account after Google sign-in. Please try again.');
         }
       }
 
@@ -288,7 +288,7 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         await saveUser(fallbackUser);
       }
 
-      if (createdUser) {
+      if (guestData) {
         await clearGuestData();
       }
 
@@ -467,6 +467,13 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         const isTransformError = errorMessage.includes('Unable to transform response') ||
           errorMessage.includes('Invalid input: expected object') ||
           errorMessage.includes('Transformation error (deserialize)');
+        const isServerError = errorMessage.includes('Server returned non-JSON response') ||
+          errorMessage.includes('Server returned invalid JSON') ||
+          errorMessage.includes('HTTP 5') ||
+          errorMessage.includes('503') ||
+          errorMessage.includes('504') ||
+          errorMessage.includes('Bad Gateway') ||
+          errorMessage.includes('Service Unavailable');
         
         // If it's a network error, we'll fall back to Supabase signup
         // If it's "user already exists", we'll try to sign in with Supabase
@@ -494,7 +501,7 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         
         // If it's not a network error and not "user already exists", throw the error
         // Network errors will fall through to Supabase signup below
-        if (!isNetworkError && !isTransformError && !supabaseUserId) {
+        if (!isNetworkError && !isTransformError && !isServerError && !supabaseUserId) {
           console.error('[UnifiedUser] Backend signup error (not network/transform):', backendError);
           throw backendError;
         }
@@ -605,33 +612,42 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       // 5. Create user in database with guest data (only if backend is available)
       // If backend was unavailable, we'll skip this and sync later
       if (backendSignupSucceeded) {
+        const directClient = createBackendClient();
+        const createPayload = {
+          email,
+          name,
+          supabaseId: supabaseUserId,
+          revenueCatUserId: email,
+          isGuest: false,
+          guestData: {
+            goal: guestData.goal,
+            timeline: guestData.timeline,
+            timeCommitment: guestData.timeCommitment,
+            answers: guestData.answers ? JSON.stringify(guestData.answers) : null,
+            roadmap: guestData.roadmap ? JSON.stringify(guestData.roadmap) : null,
+            completedTasks: Array.isArray(guestData.completedTasks) ? JSON.stringify(guestData.completedTasks) : null,
+            streakData: guestData.streakData ? JSON.stringify(guestData.streakData) : null,
+            taskTimers: guestData.taskTimers ? JSON.stringify(guestData.taskTimers) : null,
+            subscriptionPlan: guestData.subscriptionPlan,
+            subscriptionStatus: guestData.subscriptionStatus,
+            subscriptionExpiresAt: guestData.subscriptionExpiresAt?.toISOString(),
+            subscriptionPurchasedAt: guestData.subscriptionPurchasedAt?.toISOString(),
+          },
+        };
+
         try {
-          await createUserMutation.mutateAsync({
-            email,
-            name,
-            supabaseId: supabaseUserId,
-            revenueCatUserId: email,
-            isGuest: false,
-            guestData: {
-              goal: guestData.goal,
-              timeline: guestData.timeline,
-              timeCommitment: guestData.timeCommitment,
-              answers: guestData.answers ? JSON.stringify(guestData.answers) : null,
-              roadmap: guestData.roadmap ? JSON.stringify(guestData.roadmap) : null,
-              completedTasks: Array.isArray(guestData.completedTasks) ? JSON.stringify(guestData.completedTasks) : null,
-              streakData: guestData.streakData ? JSON.stringify(guestData.streakData) : null,
-              taskTimers: guestData.taskTimers ? JSON.stringify(guestData.taskTimers) : null,
-              subscriptionPlan: guestData.subscriptionPlan,
-              subscriptionStatus: guestData.subscriptionStatus,
-              subscriptionExpiresAt: guestData.subscriptionExpiresAt?.toISOString(),
-              subscriptionPurchasedAt: guestData.subscriptionPurchasedAt?.toISOString(),
-            },
-          });
-          console.log('[UnifiedUser] ✅ User created in database with guest data');
+          await createUserMutation.mutateAsync(createPayload);
+          console.log('[UnifiedUser] ✅ User created in database with guest data via mutation');
         } catch (dbError) {
-          console.warn('[UnifiedUser] Database creation error (non-critical):', dbError);
-          // Continue anyway - user is created in Supabase and local storage
-          // Data will be synced to database when backend becomes available
+          console.warn('[UnifiedUser] user.create mutation failed during sign up, attempting direct client fallback:', dbError);
+          try {
+            await directClient.user.create.mutate(createPayload);
+            console.log('[UnifiedUser] ✅ User created in database with guest data via direct client fallback');
+          } catch (directDbError) {
+            console.warn('[UnifiedUser] Database creation error (non-critical):', directDbError);
+            // Continue anyway - user is created in Supabase and local storage
+            // Data will be synced to database when backend becomes available
+          }
         }
       } else {
         console.log('[UnifiedUser] Backend unavailable - user data will be synced to database when backend is available');

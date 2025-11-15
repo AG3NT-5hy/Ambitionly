@@ -1,5 +1,6 @@
 import superjson from 'superjson';
 import { createTRPCProxyClient, httpLink } from '@trpc/client';
+import { config } from '../config';
 
 const wrappedSuperjson = {
   ...superjson,
@@ -15,7 +16,7 @@ const client = createTRPCProxyClient({
   transformer: wrappedSuperjson,
   links: [
     httpLink({
-      url: 'https://ambitionly.onrender.com/api/trpc',
+      url: `${config.API_URL}/api/trpc`,
       fetch: async (url, options) => {
         console.log('Request URL:', url);
         console.log('Request body:', options?.body);
