@@ -1,4 +1,4 @@
-import * as HonoNamespace from "hono";
+import HonoModule from "hono";
 import { trpcServer } from "@hono/trpc-server";
 import { cors } from "hono/cors";
 import { appRouter } from "./trpc/app-router"
@@ -6,7 +6,7 @@ import { createContext } from "./trpc/create-context"
 import registerEmailsApi from "./api/emails";
 
 // app will be mounted at /api
-const HonoCtor = (HonoNamespace as any)?.Hono ?? (HonoNamespace as any)?.default;
+const HonoCtor = (HonoModule as any)?.Hono ?? HonoModule;
 if (!HonoCtor) {
   throw new Error("Failed to load Hono constructor from 'hono' package");
 }
