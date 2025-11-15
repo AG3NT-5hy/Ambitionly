@@ -1,5 +1,43 @@
 # Deployment Instructions
 
+## ⚠️ Security: Environment Variables
+
+**IMPORTANT:** Never commit sensitive keys (JWT tokens, database URLs, API keys) to the repository.
+
+### Setting Environment Variables on Render
+
+All sensitive environment variables must be set in the Render Dashboard, NOT in `render.yaml`:
+
+1. **Go to Render Dashboard:**
+   - Navigate to your service (ambitionly-backend)
+   - Click on "Environment" in the left sidebar
+   - Click "Add Environment Variable"
+
+2. **Required Environment Variables:**
+   - `DATABASE_URL` - PostgreSQL connection string (KEEP SECRET!)
+   - `SUPABASE_SERVICE_ROLE_KEY` - Supabase service role JWT (KEEP SECRET!)
+   - `API_URL` - Your API URL (e.g., https://ambitionly.onrender.com)
+   - `EXPO_PUBLIC_SUPABASE_URL` - Supabase project URL
+   - `EXPO_PUBLIC_SUPABASE_ANON_KEY` - Supabase anon key
+   - `PORT` - Server port (default: 3000)
+   - `NODE_ENV` - Environment (production)
+
+3. **After Adding Variables:**
+   - Click "Save Changes"
+   - Render will automatically redeploy your service
+
+### Rotating Exposed Keys
+
+If secrets were previously committed to git:
+1. **Rotate the exposed keys immediately:**
+   - Generate new Supabase service role key in Supabase Dashboard
+   - Update database password if DATABASE_URL was exposed
+   - Update the new keys in Render Dashboard environment variables
+
+2. **Remove from Git History (Advanced):**
+   - Use `git-filter-repo` or BFG Repo-Cleaner to remove secrets from history
+   - Force push (⚠️ coordinate with team first)
+
 ## Prisma Database Migrations
 
 This project uses Prisma for database management. Migrations are automatically run during the build process on Render.

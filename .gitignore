@@ -32,6 +32,9 @@ yarn-error.*
 .env
 .env*.local
 
+# Security: Never commit secrets to render.yaml
+# Set environment variables in Render Dashboard instead
+
 # typescript
 *.tsbuildinfo
 .vercel
