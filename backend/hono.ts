@@ -3,7 +3,7 @@ import { trpcServer } from "@hono/trpc-server";
 import { cors } from "hono/cors";
 import { appRouter } from "./trpc/app-router"
 import { createContext } from "./trpc/create-context"
-import emailsApi from "./api/emails";
+import registerEmailsApi from "./api/emails";
 
 // app will be mounted at /api
 const app = new Hono();
@@ -45,8 +45,8 @@ app.use(
   })
 );
 
-// Mount emails API at /api/emails
-app.route("/api/emails", emailsApi);
+// Mount emails API routes
+registerEmailsApi(app);
 
 // Simple health check endpoint
 app.get("/", (c) => {
