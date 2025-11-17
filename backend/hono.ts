@@ -1,4 +1,5 @@
-import Hono from "hono";
+// @ts-ignore - Render runtime expects named export form
+import { Hono } from "hono";
 import { trpcServer } from "@hono/trpc-server";
 import { cors } from "hono/cors";
 import { appRouter } from "./trpc/app-router";
@@ -19,7 +20,7 @@ app.use(
   })
 );
 
-app.onError((err, c) => {
+app.onError((err: unknown, c: any) => {
   console.error("[Hono] Error:", err);
   return c.json(
     {
@@ -46,17 +47,17 @@ app.use(
 
 registerEmailsApi(app);
 
-app.get("/", (c) => {
+app.get("/", (c: any) => {
   return c.json({ status: "ok", message: "API is running" });
 });
 
-app.get("/health", (c) => {
+app.get("/health", (c: any) => {
   return c.json({
     status: "ok",
     message: "API is running",
     endpoints: {
       trpc: "/api/trpc",
-      emails: "/emails",
+      emails: "/api/emails",
       signup: "/api/trpc/auth.signup (POST)",
     },
   });

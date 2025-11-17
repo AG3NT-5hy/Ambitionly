@@ -1,4 +1,5 @@
-import Hono from 'hono';
+// @ts-ignore - Render runtime expects named export form
+import { Hono } from 'hono';
 import { emailStorageService } from '../../lib/email-storage';
 
 export const registerEmailsApi = (app: Hono) => {
@@ -73,7 +74,7 @@ export const registerEmailsApi = (app: Hono) => {
     }
   });
 
-  app.route('/emails', route);
+  app.route('/api/emails', route);
 };
 
 export default registerEmailsApi;
