@@ -6,6 +6,8 @@ node_modules/
 # Expo
 .expo/
 dist/
+build/
+.output/
 web-build/
 
 # Native
@@ -31,9 +33,6 @@ yarn-error.*
 # local env files
 .env
 .env*.local
-
-# Security: Never commit secrets to render.yaml
-# Set environment variables in Render Dashboard instead
 
 # typescript
 *.tsbuildinfo
