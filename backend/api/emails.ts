@@ -1,6 +1,4 @@
-// Use CommonJS helper to load Hono (avoids tsx module resolution issues)
-const Hono = require("../hono-loader");
-
+import { Hono } from "hono";
 import { emailStorageService } from '../../lib/email-storage';
 
 export const registerEmailsApi = (app: any) => {

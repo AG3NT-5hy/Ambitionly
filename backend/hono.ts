@@ -1,6 +1,4 @@
-// Use CommonJS helper to load Hono (avoids tsx module resolution issues)
-const Hono = require("./hono-loader");
-
+import { Hono } from "hono";
 import { trpcServer } from "@hono/trpc-server";
 import { cors } from "hono/cors";
 import { appRouter } from "./trpc/app-router";
