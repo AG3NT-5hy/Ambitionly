@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import Hono from 'hono';
 import { emailStorageService } from '../../lib/email-storage';
 
 export const registerEmailsApi = (app: Hono) => {
