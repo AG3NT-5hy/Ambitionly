@@ -1,28 +1,11 @@
-import HonoDefault, { Hono as HonoNamed } from "hono";
+import { Hono } from "hono";
 import { trpcServer } from "@hono/trpc-server";
 import { cors } from "hono/cors";
 import { appRouter } from "./trpc/app-router";
 import { createContext } from "./trpc/create-context";
 import registerEmailsApi from "./api/emails";
 
-const HonoCtor = ((): typeof HonoNamed => {
-  if (typeof HonoNamed === "function") {
-    return HonoNamed;
-  }
-
-  const maybeCtor = (HonoDefault as unknown as { Hono?: typeof HonoNamed }).Hono;
-  if (maybeCtor && typeof maybeCtor === "function") {
-    return maybeCtor;
-  }
-
-  if (typeof (HonoDefault as unknown) === "function") {
-    return HonoDefault as unknown as typeof HonoNamed;
-  }
-
-  throw new Error("[Hono] Unable to resolve Hono constructor from module exports.");
-})();
-
-const app = new HonoCtor();
+const app = new Hono();
 
 app.use(
   "*",
