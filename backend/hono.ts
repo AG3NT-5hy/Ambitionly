@@ -1,5 +1,13 @@
-// @ts-ignore - Render runtime expects named export form
-import { Hono } from "hono";
+// Use require() to work around tsx import resolution issues on Render
+const honoModule = require("hono");
+const Hono = honoModule.Hono || honoModule.default?.Hono || honoModule.default || honoModule;
+
+if (!Hono || typeof Hono !== "function") {
+  throw new Error(
+    `[Hono] Failed to load Hono constructor. Module keys: ${Object.keys(honoModule).join(", ")}`
+  );
+}
+
 import { trpcServer } from "@hono/trpc-server";
 import { cors } from "hono/cors";
 import { appRouter } from "./trpc/app-router";
