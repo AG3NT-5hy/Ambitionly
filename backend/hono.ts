@@ -1,10 +1,35 @@
 // Use require() to work around tsx import resolution issues on Render
 const honoModule = require("hono");
-const Hono = honoModule.Hono || honoModule.default?.Hono || honoModule.default || honoModule;
+
+// Try multiple ways to get the Hono constructor
+let Hono: any = null;
+
+// 1. Try named export
+if (honoModule.Hono && typeof honoModule.Hono === "function") {
+  Hono = honoModule.Hono;
+}
+// 2. Try default.Hono (nested)
+else if (honoModule.default?.Hono && typeof honoModule.default.Hono === "function") {
+  Hono = honoModule.default.Hono;
+}
+// 3. Try default as constructor
+else if (honoModule.default && typeof honoModule.default === "function") {
+  Hono = honoModule.default;
+}
+// 4. Try module itself as constructor
+else if (typeof honoModule === "function") {
+  Hono = honoModule;
+}
 
 if (!Hono || typeof Hono !== "function") {
+  const moduleKeys = Object.keys(honoModule);
+  const defaultKeys = honoModule.default ? Object.keys(honoModule.default) : [];
   throw new Error(
-    `[Hono] Failed to load Hono constructor. Module keys: ${Object.keys(honoModule).join(", ")}`
+    `[Hono] Failed to load Hono constructor.\n` +
+    `Module keys: ${moduleKeys.join(", ")}\n` +
+    `Default keys: ${defaultKeys.join(", ")}\n` +
+    `Default type: ${typeof honoModule.default}\n` +
+    `Module type: ${typeof honoModule}`
   );
 }
 
