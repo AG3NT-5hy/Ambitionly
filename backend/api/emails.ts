@@ -1,9 +1,10 @@
-import Hono from 'hono';
-import type { Hono as HonoApp } from 'hono';
+import HonoDefault, { Hono as HonoNamed } from 'hono';
 import { emailStorageService } from '../../lib/email-storage';
 
-export const registerEmailsApi = (app: HonoApp) => {
-  const route = new Hono();
+const HonoCtor = HonoNamed || (HonoDefault as unknown as { Hono?: typeof HonoNamed }).Hono || (HonoDefault as unknown as typeof HonoNamed);
+
+export const registerEmailsApi = (app: InstanceType<typeof HonoCtor>) => {
+  const route = new HonoCtor();
 
   // Get all emails
   route.get('/', async (c) => {

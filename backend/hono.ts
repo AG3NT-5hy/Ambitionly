@@ -1,13 +1,28 @@
+import HonoDefault, { Hono as HonoNamed } from "hono";
 import { trpcServer } from "@hono/trpc-server";
 import { cors } from "hono/cors";
 import { appRouter } from "./trpc/app-router";
 import { createContext } from "./trpc/create-context";
 import registerEmailsApi from "./api/emails";
 
-import Hono from "hono";
-import type { Context } from "hono";
+const HonoCtor = ((): typeof HonoNamed => {
+  if (typeof HonoNamed === "function") {
+    return HonoNamed;
+  }
 
-const app = new Hono();
+  const maybeCtor = (HonoDefault as unknown as { Hono?: typeof HonoNamed }).Hono;
+  if (maybeCtor && typeof maybeCtor === "function") {
+    return maybeCtor;
+  }
+
+  if (typeof (HonoDefault as unknown) === "function") {
+    return HonoDefault as unknown as typeof HonoNamed;
+  }
+
+  throw new Error("[Hono] Unable to resolve Hono constructor from module exports.");
+})();
+
+const app = new HonoCtor();
 
 app.use(
   "*",
@@ -21,7 +36,7 @@ app.use(
   })
 );
 
-app.onError((err: unknown, c: Context) => {
+app.onError((err, c) => {
   console.error("[Hono] Error:", err);
   return c.json(
     {
@@ -48,11 +63,11 @@ app.use(
 
 registerEmailsApi(app);
 
-app.get("/", (c: Context) => {
+app.get("/", (c) => {
   return c.json({ status: "ok", message: "API is running" });
 });
 
-app.get("/health", (c: Context) => {
+app.get("/health", (c) => {
   return c.json({
     status: "ok",
     message: "API is running",
