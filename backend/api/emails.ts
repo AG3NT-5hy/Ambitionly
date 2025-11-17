@@ -1,7 +1,11 @@
-import { emailStorageService } from '../../lib/email-storage'
-export const registerEmailsApi = (app: any) => {
+import { Hono } from 'hono';
+import { emailStorageService } from '../../lib/email-storage';
+
+export const registerEmailsApi = (app: Hono) => {
+  const route = new Hono();
+
   // Get all emails
-  app.get('/api/emails', async (c) => {
+  route.get('/', async (c) => {
     try {
       const [emails, stats] = await Promise.all([
         emailStorageService.getAllEmails(),
@@ -11,26 +15,29 @@ export const registerEmailsApi = (app: any) => {
       return c.json({
         emails,
         stats,
-        success: true
+        success: true,
       });
     } catch (error) {
       console.error('[Emails API] Failed to get emails:', error);
-      return c.json({
-        error: 'Failed to retrieve emails',
-        emails: [],
-        stats: {
-          total: 0,
-          unique: 0,
-          signups: 0,
-          logins: 0,
-          lastUpdated: null
-        }
-      }, 500);
+      return c.json(
+        {
+          error: 'Failed to retrieve emails',
+          emails: [],
+          stats: {
+            total: 0,
+            unique: 0,
+            signups: 0,
+            logins: 0,
+            lastUpdated: null,
+          },
+        },
+        500
+      );
     }
   });
 
   // Export emails
-  app.get('/api/emails/export', async (c) => {
+  route.get('/export', async (c) => {
     try {
       const format = c.req.query('format') || 'text';
 
@@ -43,7 +50,7 @@ export const registerEmailsApi = (app: any) => {
 
       return c.text(content, 200, {
         'Content-Type': format === 'csv' ? 'text/csv' : 'text/plain',
-        'Content-Disposition': `attachment; filename="emails-${new Date().toISOString().split('T')[0]}.${format}"`
+        'Content-Disposition': `attachment; filename="emails-${new Date().toISOString().split('T')[0]}.${format}"`,
       });
     } catch (error) {
       console.error('[Emails API] Failed to export emails:', error);
@@ -52,19 +59,21 @@ export const registerEmailsApi = (app: any) => {
   });
 
   // Clear emails
-  app.delete('/api/emails', async (c) => {
+  route.delete('/', async (c) => {
     try {
       await emailStorageService.clearEmails();
 
       return c.json({
         success: true,
-        message: 'All emails have been cleared'
+        message: 'All emails have been cleared',
       });
     } catch (error) {
       console.error('[Emails API] Failed to clear emails:', error);
       return c.json({ error: 'Failed to clear emails' }, 500);
     }
   });
+
+  app.route('/api/emails', route);
 };
 
 export default registerEmailsApi;
