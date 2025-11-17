@@ -73,7 +73,7 @@ export const registerEmailsApi = (app: Hono) => {
     }
   });
 
-  app.route('/api/emails', route);
+  app.route('/emails', route);
 };
 
 export default registerEmailsApi;

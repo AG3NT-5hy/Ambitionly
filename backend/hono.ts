@@ -56,7 +56,7 @@ app.get("/health", (c) => {
     message: "API is running",
     endpoints: {
       trpc: "/api/trpc",
-      emails: "/api/emails",
+      emails: "/emails",
       signup: "/api/trpc/auth.signup (POST)",
     },
   });
