@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { publicProcedure } from '../../../create-context';
-import { prisma } from '../../../../../lib/prisma'
+import { publicProcedure } from '../../../create-context.js';
+import { prisma } from '../../../../../lib/prisma.js';
 
 const VerifyTokenSchema = z.object({
   token: z.string(),

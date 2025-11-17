@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { publicProcedure } from '../../../create-context';
-import { db } from '../../../../../lib/database';
+import { publicProcedure } from '../../../create-context.js';
+import { db } from '../../../../../lib/database.js';
 
 const grantPremiumSchema = z.object({
   email: z.string().email('Invalid email address'),

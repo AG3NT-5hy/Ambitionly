@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { protectedProcedure } from '../../../create-context';
-import { db } from '../../../../../lib/database';
+import { protectedProcedure } from '../../../create-context.js';
+import { db } from '../../../../../lib/database.js';
 
 const syncUserSchema = z.object({
   userId: z.string().optional(),

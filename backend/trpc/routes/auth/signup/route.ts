@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { publicProcedure } from '../../../create-context';
-import { prisma } from '../../../../../lib/prisma'
-import { supabaseAdmin } from '../../../../lib/supabase'
-import { supabaseUserDataService } from '../../../../lib/supabase-user-data'
-import { emailStorageService } from '../../../../../lib/email-storage'
+import { publicProcedure } from '../../../create-context.js';
+import { prisma } from '../../../../../lib/prisma.js';
+import { supabaseAdmin } from '../../../../lib/supabase.js';
+import { supabaseUserDataService } from '../../../../lib/supabase-user-data.js';
+import { emailStorageService } from '../../../../../lib/email-storage.js';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 

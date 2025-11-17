@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { emailStorageService } from '../../lib/email-storage';
+import { emailStorageService } from '../../lib/email-storage.js';
 
 export const registerEmailsApi = (app: any) => {
   const route = new Hono();

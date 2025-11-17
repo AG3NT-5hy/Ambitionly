@@ -1,8 +1,8 @@
-import { createTRPCRouter } from '../../create-context';
-import { createUserProcedure } from './create/route';
-import { updateUserProcedure } from './update/route';
-import { getUserProcedure } from './get/route';
-import { syncUserProcedure } from './sync/route';
+import { createTRPCRouter } from '../../create-context.js';
+import { createUserProcedure } from './create/route.js';
+import { updateUserProcedure } from './update/route.js';
+import { getUserProcedure } from './get/route.js';
+import { syncUserProcedure } from './sync/route.js';
 
 export const userRouter = createTRPCRouter({
   create: createUserProcedure,

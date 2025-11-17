@@ -1,8 +1,8 @@
 import { z } from 'zod';
-import { publicProcedure } from '../../../create-context';
-import { supabaseAdmin } from '../../../../lib/supabase';
-import { emailStorageService } from '../../../../../lib/email-storage';
-import { db } from '../../../../../lib/database';
+import { publicProcedure } from '../../../create-context.js';
+import { supabaseAdmin } from '../../../../lib/supabase.js';
+import { emailStorageService } from '../../../../../lib/email-storage.js';
+import { db } from '../../../../../lib/database.js';
 
 const confirmSupabaseUserSchema = z.object({
   email: z.string().email(),
