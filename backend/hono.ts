@@ -1,6 +1,5 @@
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-const { Hono } = require('hono');
+import * as HonoPkg from "hono";
+const Hono = (HonoPkg as any).default || HonoPkg.Hono || HonoPkg;
 
 import { trpcServer } from "@hono/trpc-server";
 import { cors } from "hono/cors";
