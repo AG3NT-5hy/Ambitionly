@@ -3,7 +3,7 @@ services:
     name: ambitionly-backend
     env: node
     plan: free
-    buildCommand: PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1 npm install && PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1 npx prisma generate && PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1 npx prisma db push --accept-data-loss
+    buildCommand: npm install && (PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1 npm run build || (sleep 5 && PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1 npm run build))
     startCommand: npx tsx --tsconfig backend/tsconfig.json server.ts
     envVars:
       - key: DATABASE_URL
