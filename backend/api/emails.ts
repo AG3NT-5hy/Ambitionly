@@ -1,6 +1,8 @@
 ﻿import { emailStorageService } from '../../lib/email-storage';
-
-const Hono = require('hono').default || require('hono').Hono;
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const honoModule = require('hono');
+const Hono = honoModule.Hono || honoModule.default?.Hono || honoModule;
 
 const emailsApi = new Hono();
 

@@ -1,4 +1,7 @@
-const Hono = require('hono').default || require('hono').Hono;
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const honoModule = require('hono');
+const Hono = honoModule.Hono || honoModule.default?.Hono || honoModule;
 
 import { trpcServer } from "@hono/trpc-server";
 import { cors } from "hono/cors";
