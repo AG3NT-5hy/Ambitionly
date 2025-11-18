@@ -1,7 +1,8 @@
-﻿import * as HonoModule from 'hono';
-import { emailStorageService } from '../../lib/email-storage'
+﻿import { emailStorageService } from '../../lib/email-storage'
 
-const emailsApi = new HonoModule.Hono();
+// Use require for Hono to work with tsx transformation
+const { Hono } = require('hono');
+const emailsApi = new Hono();
 
 emailsApi.get('/', async (c) => {
   try {

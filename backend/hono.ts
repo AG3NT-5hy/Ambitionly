@@ -1,5 +1,5 @@
-import * as HonoModule from "hono";
-const { Hono } = HonoModule;
+// Use require for Hono to work with tsx transformation
+const { Hono } = require("hono");
 import { trpcServer } from "@hono/trpc-server";
 import { cors } from "hono/cors";
 import { appRouter } from "./trpc/app-router"
