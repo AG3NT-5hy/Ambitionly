@@ -3,10 +3,12 @@ import { loginProcedure } from "./routes/auth/login/route";
 import { signupProcedure } from "./routes/auth/signup/route";
 import { verifyTokenProcedure } from "./routes/auth/verify/route";
 import { confirmSupabaseUserProcedure } from "./routes/auth/confirm-supabase-user/route";
-import { syncDataProcedure, getUserDataProcedure, clearUserDataProcedure } from "./routes/user/sync/route";
 import { getEmailsProcedure, exportEmailsProcedure, clearEmailsProcedure, getEmailStatsProcedure } from "./routes/admin/emails/route";
 import { grantPremiumProcedure } from "./routes/admin/users/route";
-import { userRouter } from "./routes/user/router";
+import { createUserProcedure } from "./routes/user/create/route";
+import { updateUserProcedure } from "./routes/user/update/route";
+import { getUserProcedure } from "./routes/user/get/route";
+import { syncUserProcedure } from "./routes/user/sync/route";
 import { revenueCatWebhookProcedure } from "./routes/webhooks/revenuecat/route";
 
 export const appRouter = createTRPCRouter({
@@ -17,16 +19,10 @@ export const appRouter = createTRPCRouter({
     confirmSupabaseUser: confirmSupabaseUserProcedure,
   }),
   user: createTRPCRouter({
-    // Legacy endpoints
-    sync: syncDataProcedure,
-    getData: getUserDataProcedure,
-    clearData: clearUserDataProcedure,
-    
-    // New unified user endpoints
-    create: userRouter.create,
-    update: userRouter.update,
-    get: userRouter.get,
-    syncUser: userRouter.sync,
+    create: createUserProcedure,
+    update: updateUserProcedure,
+    get: getUserProcedure,
+    sync: syncUserProcedure,
   }),
   admin: createTRPCRouter({
     emails: createTRPCRouter({
