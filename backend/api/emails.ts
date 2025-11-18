@@ -1,6 +1,6 @@
 ﻿import { emailStorageService } from '../../lib/email-storage';
-import * as HonoPkg from 'hono';
-const Hono = (HonoPkg as any).default || HonoPkg.Hono || HonoPkg;
+
+const Hono = require('hono').default || require('hono').Hono;
 
 const emailsApi = new Hono();
 

@@ -1,5 +1,4 @@
-import * as HonoPkg from "hono";
-const Hono = (HonoPkg as any).default || HonoPkg.Hono || HonoPkg;
+const Hono = require('hono').default || require('hono').Hono;
 
 import { trpcServer } from "@hono/trpc-server";
 import { cors } from "hono/cors";
