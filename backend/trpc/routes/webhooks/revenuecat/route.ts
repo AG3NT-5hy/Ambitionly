@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { publicProcedure } from '../../../create-context.js';
+import { publicProcedure } from '../../../create-context';
 
 const revenueCatWebhookSchema = z.object({
   event: z.object({

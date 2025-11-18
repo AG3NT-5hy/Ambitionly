@@ -46,7 +46,7 @@ export default function SplashScreen() {
     }).start();
 
     // Local asset loads immediately, no prefetch needed
-    setImageLoaded(true);
+      setImageLoaded(true);
     
     return () => {
       backgroundAnimation.stop();

@@ -1,37 +1,38 @@
 import { Hono } from "hono";
 import { trpcServer } from "@hono/trpc-server";
 import { cors } from "hono/cors";
-import { appRouter } from "./trpc/app-router.js";
-import { createContext } from "./trpc/create-context.js";
-import registerEmailsApi from "./api/emails.js";
+import { appRouter } from "./trpc/app-router"
+import { createContext } from "./trpc/create-context"
+import emailsApi from "./api/emails";
 
+// app will be mounted at /api
 const app = new Hono();
 
-app.use(
-  "*",
-  cors({
-    origin: "*",
-    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allowHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
-    exposeHeaders: ["Content-Length", "Content-Type"],
-    maxAge: 600,
-    credentials: true,
-  })
-);
+// Enable CORS for all routes
+app.use("*", cors({
+  origin: "*", // Allow all origins for now
+  allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+  allowHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+  exposeHeaders: ["Content-Length", "Content-Type"],
+  maxAge: 600,
+  credentials: true,
+}));
 
-app.onError((err: unknown, c: any) => {
-  console.error("[Hono] Error:", err);
+// Add error handling middleware
+app.onError((err, c) => {
+  console.error('[Hono] Error:', err);
   return c.json(
     {
       error: {
-        message: err instanceof Error ? err.message : "Internal server error",
-        code: "INTERNAL_SERVER_ERROR",
+        message: err.message || 'Internal server error',
+        code: 'INTERNAL_SERVER_ERROR',
       },
     },
     500
   );
 });
 
+// Mount tRPC router at /api/trpc
 app.use(
   "/api/trpc/*",
   trpcServer({
@@ -44,21 +45,24 @@ app.use(
   })
 );
 
-registerEmailsApi(app);
+// Mount emails API at /api/emails
+app.route("/api/emails", emailsApi);
 
-app.get("/", (c: any) => {
+// Simple health check endpoint
+app.get("/", (c) => {
   return c.json({ status: "ok", message: "API is running" });
 });
 
-app.get("/health", (c: any) => {
-  return c.json({
-    status: "ok",
+// Health check for tRPC
+app.get("/health", (c) => {
+  return c.json({ 
+    status: "ok", 
     message: "API is running",
     endpoints: {
       trpc: "/api/trpc",
       emails: "/api/emails",
-      signup: "/api/trpc/auth.signup (POST)",
-    },
+      signup: "/api/trpc/auth.signup (POST)"
+    }
   });
 });
 

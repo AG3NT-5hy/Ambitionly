@@ -8,7 +8,7 @@ const host = process.env.HOST || '0.0.0.0'
 const baseUrl = config.API_URL.replace(/\/+$/, '')
 
 console.log(`🚀 Server is running on port ${port}`)
-console.log(`📧 Email API available at: ${baseUrl}/emails`)
+console.log(`📧 Email API available at: ${baseUrl}/api/emails`)
 console.log(`🔧 tRPC API available at: ${baseUrl}/api/trpc`)
 
 serve({

@@ -1,13 +1,13 @@
-import { createTRPCRouter } from "./create-context.js";
-import { loginProcedure } from "./routes/auth/login/route.js";
-import { signupProcedure } from "./routes/auth/signup/route.js";
-import { verifyTokenProcedure } from "./routes/auth/verify/route.js";
-import { confirmSupabaseUserProcedure } from "./routes/auth/confirm-supabase-user/route.js";
-import { syncDataProcedure, getUserDataProcedure, clearUserDataProcedure } from "./routes/user/sync/route.js";
-import { getEmailsProcedure, exportEmailsProcedure, clearEmailsProcedure, getEmailStatsProcedure } from "./routes/admin/emails/route.js";
-import { grantPremiumProcedure } from "./routes/admin/users/route.js";
-import { userRouter } from "./routes/user/router.js";
-import { revenueCatWebhookProcedure } from "./routes/webhooks/revenuecat/route.js";
+import { createTRPCRouter } from "./create-context";
+import { loginProcedure } from "./routes/auth/login/route";
+import { signupProcedure } from "./routes/auth/signup/route";
+import { verifyTokenProcedure } from "./routes/auth/verify/route";
+import { confirmSupabaseUserProcedure } from "./routes/auth/confirm-supabase-user/route";
+import { syncDataProcedure, getUserDataProcedure, clearUserDataProcedure } from "./routes/user/sync/route";
+import { getEmailsProcedure, exportEmailsProcedure, clearEmailsProcedure, getEmailStatsProcedure } from "./routes/admin/emails/route";
+import { grantPremiumProcedure } from "./routes/admin/users/route";
+import { userRouter } from "./routes/user/router";
+import { revenueCatWebhookProcedure } from "./routes/webhooks/revenuecat/route";
 
 export const appRouter = createTRPCRouter({
   auth: createTRPCRouter({

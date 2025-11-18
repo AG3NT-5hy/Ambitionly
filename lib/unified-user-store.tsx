@@ -614,25 +614,25 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       if (backendSignupSucceeded) {
         const directClient = createBackendClient();
         const createPayload = {
-          email,
-          name,
-          supabaseId: supabaseUserId,
-          revenueCatUserId: email,
-          isGuest: false,
-          guestData: {
-            goal: guestData.goal,
-            timeline: guestData.timeline,
-            timeCommitment: guestData.timeCommitment,
-            answers: guestData.answers ? JSON.stringify(guestData.answers) : null,
-            roadmap: guestData.roadmap ? JSON.stringify(guestData.roadmap) : null,
-            completedTasks: Array.isArray(guestData.completedTasks) ? JSON.stringify(guestData.completedTasks) : null,
-            streakData: guestData.streakData ? JSON.stringify(guestData.streakData) : null,
-            taskTimers: guestData.taskTimers ? JSON.stringify(guestData.taskTimers) : null,
-            subscriptionPlan: guestData.subscriptionPlan,
-            subscriptionStatus: guestData.subscriptionStatus,
-            subscriptionExpiresAt: guestData.subscriptionExpiresAt?.toISOString(),
-            subscriptionPurchasedAt: guestData.subscriptionPurchasedAt?.toISOString(),
-          },
+            email,
+            name,
+            supabaseId: supabaseUserId,
+            revenueCatUserId: email,
+            isGuest: false,
+            guestData: {
+              goal: guestData.goal,
+              timeline: guestData.timeline,
+              timeCommitment: guestData.timeCommitment,
+              answers: guestData.answers ? JSON.stringify(guestData.answers) : null,
+              roadmap: guestData.roadmap ? JSON.stringify(guestData.roadmap) : null,
+              completedTasks: Array.isArray(guestData.completedTasks) ? JSON.stringify(guestData.completedTasks) : null,
+              streakData: guestData.streakData ? JSON.stringify(guestData.streakData) : null,
+              taskTimers: guestData.taskTimers ? JSON.stringify(guestData.taskTimers) : null,
+              subscriptionPlan: guestData.subscriptionPlan,
+              subscriptionStatus: guestData.subscriptionStatus,
+              subscriptionExpiresAt: guestData.subscriptionExpiresAt?.toISOString(),
+              subscriptionPurchasedAt: guestData.subscriptionPurchasedAt?.toISOString(),
+            },
         };
 
         try {
@@ -645,8 +645,8 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
             console.log('[UnifiedUser] ✅ User created in database with guest data via direct client fallback');
           } catch (directDbError) {
             console.warn('[UnifiedUser] Database creation error (non-critical):', directDbError);
-            // Continue anyway - user is created in Supabase and local storage
-            // Data will be synced to database when backend becomes available
+          // Continue anyway - user is created in Supabase and local storage
+          // Data will be synced to database when backend becomes available
           }
         }
       } else {
