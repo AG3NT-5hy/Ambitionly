@@ -1,7 +1,7 @@
-﻿import { Hono } from 'hono';
+﻿import * as HonoModule from 'hono';
 import { emailStorageService } from '../../lib/email-storage'
 
-const emailsApi = new Hono();
+const emailsApi = new HonoModule.Hono();
 
 emailsApi.get('/', async (c) => {
   try {
