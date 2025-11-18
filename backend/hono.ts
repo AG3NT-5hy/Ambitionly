@@ -1,4 +1,6 @@
-import { Hono } from "hono";
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const { Hono } = require('hono');
 
 import { trpcServer } from "@hono/trpc-server";
 import { cors } from "hono/cors";
