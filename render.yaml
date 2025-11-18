@@ -20,4 +20,6 @@ services:
         value: 3000
       - key: NODE_ENV
         value: production
+      - key: PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING
+        value: "1"
 
