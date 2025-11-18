@@ -1,9 +1,9 @@
-// Use require for Hono to work with tsx transformation
-const Hono = require("hono").Hono;
+import { Hono } from "hono";
+
 import { trpcServer } from "@hono/trpc-server";
 import { cors } from "hono/cors";
-import { appRouter } from "./trpc/app-router"
-import { createContext } from "./trpc/create-context"
+import { appRouter } from "./trpc/app-router";
+import { createContext } from "./trpc/create-context";
 import emailsApi from "./api/emails";
 
 // app will be mounted at /api
