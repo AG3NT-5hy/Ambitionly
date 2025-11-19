@@ -1,15 +1,10 @@
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-const honoModule = require('hono');
-const Hono = honoModule.Hono || honoModule.default?.Hono || honoModule;
-
+import { Hono } from "hono";
 import { trpcServer } from "@hono/trpc-server";
 import { cors } from "hono/cors";
 import { appRouter } from "./trpc/app-router";
 import { createContext } from "./trpc/create-context";
-import emailsApi from "./api/emails";
+import { registerEmailRoutes } from "./api/emails";
 
-// app will be mounted at /api
 const app = new Hono();
 
 // Enable CORS for all routes
@@ -49,8 +44,8 @@ app.use(
   })
 );
 
-// Mount emails API at /api/emails
-app.route("/api/emails", emailsApi);
+// Register placeholder email routes (email collection disabled)
+registerEmailRoutes(app);
 
 // Simple health check endpoint
 app.get("/", (c) => {
