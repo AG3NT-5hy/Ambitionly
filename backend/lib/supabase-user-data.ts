@@ -3,7 +3,7 @@
  * This version uses the backend Supabase client
  */
 
-import { supabaseAdmin as supabase } from './supabase.js';
+import { supabaseAdmin as supabase } from './supabase';
 
 export interface UserData {
   goal?: string;
