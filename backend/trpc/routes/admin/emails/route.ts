@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { publicProcedure } from '../../../create-context';
-import { emailStorageService } from '../../../../../lib/email-storage'
+import { publicProcedure } from '../../../create-context.js';
+import { emailStorageService } from '../../../../../lib/email-storage.js'
 
 // Admin-only procedure for email management (using publicProcedure for now)
 export const getEmailsProcedure = publicProcedure

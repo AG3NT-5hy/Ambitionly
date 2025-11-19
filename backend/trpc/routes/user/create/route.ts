@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { protectedProcedure } from '../../../create-context';
-import { db } from '../../../../../lib/database';
-import { emailStorageService } from '../../../../../lib/email-storage';
+import { protectedProcedure } from '../../../create-context.js';
+import { db } from '../../../../../lib/database.js';
+import { emailStorageService } from '../../../../../lib/email-storage.js';
 import * as bcrypt from 'bcryptjs';
 
 const createUserSchema = z.object({
