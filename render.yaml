@@ -4,7 +4,7 @@ services:
     env: node
     plan: free
     buildCommand: npm install && PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1 npx prisma generate || (sleep 10 && PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1 npx prisma generate)
-    startCommand: node --loader tsx/esm server.ts
+    startCommand: node --import tsx/esm server.ts
     envVars:
       - key: DATABASE_URL
         value: postgresql://postgres.ysmcmlduiokkfcbohxjl:%40%266A%25_-.cysyAZ3@aws-1-ap-southeast-1.pooler.supabase.com:5432/postgres
