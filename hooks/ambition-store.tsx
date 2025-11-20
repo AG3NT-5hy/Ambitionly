@@ -80,22 +80,50 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
   // tRPC mutation for syncing data (must be at hook level)
   const updateUserMutation = trpc.user.update.useMutation();
   
-  // Get user info for syncing (we'll check if user is registered)
-  // Note: We can't use useUnifiedUser here directly due to hook rules, so we'll check via Supabase session
-  const checkUserSession = async (): Promise<{ email: string | null; isRegistered: boolean }> => {
+  // Get user info for syncing (we'll check if user is registered and has premium)
+  // Note: We can't use useUnifiedUser here directly due to hook rules, so we'll check via Supabase session and AsyncStorage
+  const checkUserSession = async (): Promise<{ email: string | null; isRegistered: boolean; hasPremium: boolean }> => {
     try {
       const { supabase } = await import('@/lib/supabase');
       const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session?.user?.email) {
+        return { email: null, isRegistered: false, hasPremium: false };
+      }
+      
+      // Check subscription status from unified user store
+      const { STORAGE_KEYS } = await import('@/constants');
+      const storedUser = await AsyncStorage.getItem(STORAGE_KEYS.USER);
+      
+      if (storedUser) {
+        try {
+          const userData = JSON.parse(storedUser);
+          const hasPremium = userData.subscriptionPlan && 
+                            userData.subscriptionPlan !== 'free' &&
+                            userData.subscriptionStatus === 'active' &&
+                            (!userData.subscriptionExpiresAt || new Date(userData.subscriptionExpiresAt) > new Date());
+          
+          return {
+            email: session.user.email,
+            isRegistered: true,
+            hasPremium: hasPremium || false,
+          };
+        } catch (e) {
+          console.warn('[Ambition] Failed to parse user data for premium check:', e);
+        }
+      }
+      
       return {
-        email: session?.user?.email || null,
-        isRegistered: !!session?.user,
+        email: session.user.email,
+        isRegistered: true,
+        hasPremium: false,
       };
     } catch (error) {
-      return { email: null, isRegistered: false };
+      return { email: null, isRegistered: false, hasPremium: false };
     }
   };
   
-  // Sync ambition data to database
+  // Sync ambition data to database (only for premium users)
   const syncAmbitionDataToDatabase = useCallback(async () => {
     // Prevent concurrent syncs
     if (syncInProgressRef.current) {
@@ -111,8 +139,13 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         return;
       }
       
+      if (!userSession.hasPremium) {
+        console.log('[Ambition] User does not have premium subscription, skipping cloud sync');
+        return;
+      }
+      
       syncInProgressRef.current = true;
-      console.log('[Ambition] Syncing data to database...');
+      console.log('[Ambition] Syncing data to database (premium user)...');
       
       // Use mutateAsync for proper async handling
       await updateUserMutation.mutateAsync({
@@ -136,111 +169,116 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     }
   }, [goal, timeline, timeCommitment, answers, roadmap, completedTasks, streakData, taskTimers, updateUserMutation]);
 
+  // Load data from storage - extracted to reusable function
+  const loadDataFromStorage = useCallback(async () => {
+    try {
+      console.log('[Ambition] Loading data from storage...');
+      // Add timeout to prevent infinite loading
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Storage load timeout')), 5000);
+      });
+      
+      const storagePromise = Promise.all([
+        AsyncStorage.getItem(STORAGE_KEYS.GOAL),
+        AsyncStorage.getItem(STORAGE_KEYS.TIMELINE),
+        AsyncStorage.getItem(STORAGE_KEYS.TIME_COMMITMENT),
+        AsyncStorage.getItem(STORAGE_KEYS.ANSWERS),
+        AsyncStorage.getItem(STORAGE_KEYS.ROADMAP),
+        AsyncStorage.getItem(STORAGE_KEYS.COMPLETED_TASKS),
+        AsyncStorage.getItem(STORAGE_KEYS.STREAK_DATA),
+        AsyncStorage.getItem(STORAGE_KEYS.TASK_TIMERS),
+      ]);
+      
+      const [
+        storedGoal,
+        storedTimeline,
+        storedTimeCommitment,
+        storedAnswers,
+        storedRoadmap,
+        storedCompletedTasks,
+        storedStreakData,
+        storedTaskTimers,
+      ] = await Promise.race([storagePromise, timeoutPromise]) as string[];
+
+      if (storedGoal) setGoalState(storedGoal);
+      if (storedTimeline) setTimelineState(storedTimeline);
+      if (storedTimeCommitment) setTimeCommitmentState(storedTimeCommitment);
+      if (storedAnswers) {
+        try {
+          const parsed = JSON.parse(storedAnswers);
+          setAnswersState(parsed);
+        } catch (error) {
+          console.error('Failed to parse stored answers:', error);
+          console.error('Stored answers value:', storedAnswers?.substring(0, 100));
+          setAnswersState([]);
+        }
+      }
+      if (storedRoadmap) {
+        try {
+          const parsed = JSON.parse(storedRoadmap);
+          // Convert createdAt string back to Date object if it exists
+          if (parsed.createdAt && typeof parsed.createdAt === 'string') {
+            parsed.createdAt = new Date(parsed.createdAt);
+          }
+          // Validate that the roadmap has the expected structure
+          if (parsed && typeof parsed === 'object' && parsed.phases && Array.isArray(parsed.phases)) {
+            setRoadmapState(parsed);
+            console.log('[Ambition] ✅ Roadmap loaded from storage');
+          } else {
+            console.warn('Invalid roadmap structure loaded from storage, setting to null');
+            setRoadmapState(null);
+          }
+        } catch (error) {
+          console.error('Failed to parse stored roadmap:', error);
+          console.error('Stored roadmap value:', storedRoadmap?.substring(0, 100));
+          setRoadmapState(null);
+        }
+      }
+      if (storedCompletedTasks) {
+        try {
+          const parsed = JSON.parse(storedCompletedTasks);
+          setCompletedTasksState(parsed);
+        } catch (error) {
+          console.error('Failed to parse stored completed tasks:', error);
+          console.error('Stored completed tasks value:', storedCompletedTasks?.substring(0, 100));
+          setCompletedTasksState([]);
+        }
+      }
+      if (storedStreakData) {
+        try {
+          const parsed = JSON.parse(storedStreakData);
+          setStreakDataState(parsed);
+        } catch (error) {
+          console.error('Failed to parse stored streak data:', error);
+          console.error('Stored streak data value:', storedStreakData?.substring(0, 100));
+          setStreakDataState({ lastCompletionDate: '', streak: 0 });
+        }
+      }
+      if (storedTaskTimers) {
+        try {
+          const parsed = JSON.parse(storedTaskTimers);
+          setTaskTimersState(parsed);
+        } catch (error) {
+          console.error('Failed to parse stored task timers:', error);
+          console.error('Stored task timers value:', storedTaskTimers?.substring(0, 100));
+          setTaskTimersState([]);
+        }
+      }
+      
+      console.log('[Ambition] ✅ Data loaded from storage');
+    } catch (error) {
+      console.error('Error loading stored data:', error);
+    }
+  }, []);
+
   // Load data from storage on init
   useEffect(() => {
     let isMounted = true;
     
     const loadData = async () => {
-      try {
-        // Add timeout to prevent infinite loading
-        const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('Storage load timeout')), 5000);
-        });
-        
-        const storagePromise = Promise.all([
-          AsyncStorage.getItem(STORAGE_KEYS.GOAL),
-          AsyncStorage.getItem(STORAGE_KEYS.TIMELINE),
-          AsyncStorage.getItem(STORAGE_KEYS.TIME_COMMITMENT),
-          AsyncStorage.getItem(STORAGE_KEYS.ANSWERS),
-          AsyncStorage.getItem(STORAGE_KEYS.ROADMAP),
-          AsyncStorage.getItem(STORAGE_KEYS.COMPLETED_TASKS),
-          AsyncStorage.getItem(STORAGE_KEYS.STREAK_DATA),
-          AsyncStorage.getItem(STORAGE_KEYS.TASK_TIMERS),
-        ]);
-        
-        const [
-          storedGoal,
-          storedTimeline,
-          storedTimeCommitment,
-          storedAnswers,
-          storedRoadmap,
-          storedCompletedTasks,
-          storedStreakData,
-          storedTaskTimers,
-        ] = await Promise.race([storagePromise, timeoutPromise]) as string[];
-
-        if (!isMounted) return;
-
-        if (storedGoal) setGoalState(storedGoal);
-        if (storedTimeline) setTimelineState(storedTimeline);
-        if (storedTimeCommitment) setTimeCommitmentState(storedTimeCommitment);
-        if (storedAnswers) {
-          try {
-            const parsed = JSON.parse(storedAnswers);
-            setAnswersState(parsed);
-          } catch (error) {
-            console.error('Failed to parse stored answers:', error);
-            console.error('Stored answers value:', storedAnswers?.substring(0, 100));
-            setAnswersState([]);
-          }
-        }
-        if (storedRoadmap) {
-          try {
-            const parsed = JSON.parse(storedRoadmap);
-            // Convert createdAt string back to Date object if it exists
-            if (parsed.createdAt && typeof parsed.createdAt === 'string') {
-              parsed.createdAt = new Date(parsed.createdAt);
-            }
-            // Validate that the roadmap has the expected structure
-            if (parsed && typeof parsed === 'object' && parsed.phases && Array.isArray(parsed.phases)) {
-              setRoadmapState(parsed);
-            } else {
-              console.warn('Invalid roadmap structure loaded from storage, setting to null');
-              setRoadmapState(null);
-            }
-          } catch (error) {
-            console.error('Failed to parse stored roadmap:', error);
-            console.error('Stored roadmap value:', storedRoadmap?.substring(0, 100));
-            setRoadmapState(null);
-          }
-        }
-        if (storedCompletedTasks) {
-          try {
-            const parsed = JSON.parse(storedCompletedTasks);
-            setCompletedTasksState(parsed);
-          } catch (error) {
-            console.error('Failed to parse stored completed tasks:', error);
-            console.error('Stored completed tasks value:', storedCompletedTasks?.substring(0, 100));
-            setCompletedTasksState([]);
-          }
-        }
-        if (storedStreakData) {
-          try {
-            const parsed = JSON.parse(storedStreakData);
-            setStreakDataState(parsed);
-          } catch (error) {
-            console.error('Failed to parse stored streak data:', error);
-            console.error('Stored streak data value:', storedStreakData?.substring(0, 100));
-            setStreakDataState({ lastCompletionDate: '', streak: 0 });
-          }
-        }
-        if (storedTaskTimers) {
-          try {
-            const parsed = JSON.parse(storedTaskTimers);
-            setTaskTimersState(parsed);
-          } catch (error) {
-            console.error('Failed to parse stored task timers:', error);
-            console.error('Stored task timers value:', storedTaskTimers?.substring(0, 100));
-            setTaskTimersState([]);
-          }
-        }
-        
+      await loadDataFromStorage();
+      if (isMounted) {
         setIsHydrated(true);
-      } catch (error) {
-        console.error('Error loading stored data:', error);
-        if (isMounted) {
-          setIsHydrated(true); // Still mark as hydrated even on error
-        }
       }
     };
     
@@ -258,7 +296,31 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
       isMounted = false;
       clearTimeout(fallbackTimeout);
     };
-  }, [isHydrated]);
+  }, [isHydrated, loadDataFromStorage]);
+
+  // Listen for storage reload events (triggered after sign-in)
+  useEffect(() => {
+    const handleStorageReload = () => {
+      console.log('[Ambition] Storage reload event received, reloading data...');
+      loadDataFromStorage();
+    };
+
+    // Listen for React Native DeviceEventEmitter events
+    const { DeviceEventEmitter } = require('react-native');
+    const reloadSubscription = DeviceEventEmitter.addListener('ambition-storage-reload', handleStorageReload);
+    
+    // Listen for premium upgrade trigger to sync data
+    const syncTriggerHandler = () => {
+      console.log('[Ambition] Received premium upgrade trigger, syncing data...');
+      syncAmbitionDataToDatabase();
+    };
+    const syncSubscription = DeviceEventEmitter.addListener('ambition-sync-trigger', syncTriggerHandler);
+    
+    return () => {
+      reloadSubscription.remove();
+      syncSubscription.remove();
+    };
+  }, [loadDataFromStorage, syncAmbitionDataToDatabase]);
 
   // Monitor timer completion and send fallback notifications ONLY when:
   // 1. Timer has actually completed (elapsed time >= required duration)
@@ -368,6 +430,8 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     }
     setTimelineState(sanitized);
     await AsyncStorage.setItem(STORAGE_KEYS.TIMELINE, sanitized);
+    // Sync to database
+    await syncAmbitionDataToDatabase();
   };
 
   const setTimeCommitment = async (newTimeCommitment: string) => {
@@ -1216,6 +1280,9 @@ Output ONLY valid JSON in this exact format:
       setCompletedTasksState([]);
       setStreakDataState({ lastCompletionDate: '', streak: 0 });
       setTaskTimersState([]);
+      
+      // Sync to database after reset
+      await syncAmbitionDataToDatabase();
     } catch (error) {
       console.error('Error resetting progress:', error);
     }
@@ -1244,6 +1311,9 @@ Output ONLY valid JSON in this exact format:
       setCompletedTasksState([]);
       setStreakDataState({ lastCompletionDate: '', streak: 0 });
       setTaskTimersState([]);
+      
+      // Sync to database after clearing (will sync empty/null values)
+      await syncAmbitionDataToDatabase();
     } catch (error) {
       console.error('Error clearing data:', error);
     }
@@ -1279,6 +1349,7 @@ Output ONLY valid JSON in this exact format:
     isTaskUnlocked,
     isMilestoneUnlocked,
     isPhaseUnlocked,
+    reloadFromStorage: loadDataFromStorage,
   };
 });
 

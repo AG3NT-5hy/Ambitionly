@@ -9,7 +9,7 @@ import { useUi } from '../../providers/UiProvider'
 import * as ImagePicker from 'expo-image-picker';
 
 export default function AccountScreen() {
-  const { user, signOut, updateProfile } = useUnifiedUser();
+  const { user, signOut, updateProfile, isGuest } = useUnifiedUser();
   const { showToast } = useUi();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
@@ -115,9 +115,13 @@ export default function AccountScreen() {
           onPress: async () => {
             try {
               await signOut();
+              // Small delay to ensure all state is cleared
+              await new Promise(resolve => setTimeout(resolve, 100));
               showToast('Signed out successfully', 'success');
+              // Use replace to prevent going back
               router.replace('/welcome');
-            } catch {
+            } catch (error) {
+              console.error('Sign out error:', error);
               showToast('Failed to sign out', 'error');
             }
           },
@@ -169,12 +173,14 @@ export default function AccountScreen() {
                     <User size={48} color="#00E6E6" />
                   )}
                 </View>
-                <TouchableOpacity 
-                  style={styles.cameraButton}
-                  onPress={handlePickImage}
-                >
-                  <Camera size={16} color="#FFFFFF" />
-                </TouchableOpacity>
+                {!isGuest && (
+                  <TouchableOpacity 
+                    style={styles.cameraButton}
+                    onPress={handlePickImage}
+                  >
+                    <Camera size={16} color="#FFFFFF" />
+                  </TouchableOpacity>
+                )}
               </View>
               <Text style={styles.profileName}>{user?.name || (user?.isGuest ? 'Guest User' : 'User')}</Text>
               {user?.username && (
@@ -186,10 +192,13 @@ export default function AccountScreen() {
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
                 <Text style={styles.sectionTitle}>Profile Information</Text>
-                {!isEditing && (
+                {!isEditing && !isGuest && (
                   <TouchableOpacity onPress={() => setIsEditing(true)}>
                     <Text style={styles.editButton}>Edit</Text>
                   </TouchableOpacity>
+                )}
+                {isGuest && (
+                  <Text style={styles.guestHint}>Sign up to edit</Text>
                 )}
               </View>
 
@@ -200,12 +209,12 @@ export default function AccountScreen() {
                     <Text style={styles.inputLabelText}>Name</Text>
                   </View>
                   <TextInput
-                    style={[styles.input, !isEditing && styles.inputDisabled]}
+                    style={[styles.input, (!isEditing || isGuest) && styles.inputDisabled]}
                     value={name}
                     onChangeText={setName}
                     placeholder="Enter your name"
                     placeholderTextColor="#666666"
-                    editable={isEditing}
+                    editable={isEditing && !isGuest}
                   />
                 </View>
 
@@ -215,34 +224,32 @@ export default function AccountScreen() {
                     <Text style={styles.inputLabelText}>Username</Text>
                   </View>
                   <TextInput
-                    style={[styles.input, !isEditing && styles.inputDisabled]}
+                    style={[styles.input, (!isEditing || isGuest) && styles.inputDisabled]}
                     value={username}
                     onChangeText={setUsername}
                     placeholder="Enter your username (optional)"
                     placeholderTextColor="#666666"
                     autoCapitalize="none"
                     autoCorrect={false}
-                    editable={isEditing}
+                    editable={isEditing && !isGuest}
                   />
                 </View>
 
-                {!user?.isGuest && (
-                  <View style={styles.inputGroup}>
-                    <View style={styles.inputLabel}>
-                      <Mail size={18} color="#00E6E6" />
-                      <Text style={styles.inputLabelText}>Email</Text>
-                    </View>
-                    <TextInput
-                      style={[styles.input, styles.inputDisabled]}
-                      value={email}
-                      placeholder="Email (cannot be changed)"
-                      placeholderTextColor="#666666"
-                      keyboardType="email-address"
-                      autoCapitalize="none"
-                      editable={false}
-                    />
+                <View style={styles.inputGroup}>
+                  <View style={styles.inputLabel}>
+                    <Mail size={18} color="#00E6E6" />
+                    <Text style={styles.inputLabelText}>Email</Text>
                   </View>
-                )}
+                  <TextInput
+                    style={[styles.input, styles.inputDisabled]}
+                    value={email}
+                    placeholder={isGuest ? "Sign up to set email" : "Email (cannot be changed)"}
+                    placeholderTextColor="#666666"
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    editable={false}
+                  />
+                </View>
 
                 {isEditing && (
                   <View style={styles.buttonRow}>
@@ -269,25 +276,40 @@ export default function AccountScreen() {
               </View>
             </View>
 
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Account Details</Text>
-              <View style={styles.card}>
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Member Since</Text>
-                  <Text style={styles.detailValue}>{formatDate(user?.signedUpAt)}</Text>
+            {!isGuest && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Account Details</Text>
+                <View style={styles.card}>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Member Since</Text>
+                    <Text style={styles.detailValue}>{formatDate(user?.createdAt)}</Text>
+                  </View>
                 </View>
               </View>
-            </View>
+            )}
 
-            <View style={styles.section}>
-              <TouchableOpacity
-                style={styles.signOutButton}
-                onPress={handleSignOut}
-              >
-                <LogOut size={20} color="#FF6B6B" />
-                <Text style={styles.signOutText}>Sign Out</Text>
-              </TouchableOpacity>
-            </View>
+            {isGuest && (
+              <View style={styles.section}>
+                <TouchableOpacity
+                  style={styles.signUpButton}
+                  onPress={() => router.push('/login')}
+                >
+                  <Text style={styles.signUpButtonText}>Sign Up to Save Your Profile</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {!isGuest && (
+              <View style={styles.section}>
+                <TouchableOpacity
+                  style={styles.signOutButton}
+                  onPress={handleSignOut}
+                >
+                  <LogOut size={20} color="#FF6B6B" />
+                  <Text style={styles.signOutText}>Sign Out</Text>
+                </TouchableOpacity>
+              </View>
+            )}
 
             <View style={styles.footer}>
               <Text style={styles.footerText}>
@@ -523,5 +545,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666666',
     textAlign: 'center',
+  },
+  guestHint: {
+    fontSize: 14,
+    color: '#9A9A9A',
+    fontStyle: 'italic',
+  },
+  signUpButton: {
+    backgroundColor: '#00E6E6',
+    borderRadius: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  signUpButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000000',
   },
 });

@@ -3,15 +3,25 @@ import { View, StyleSheet, Image, useWindowDimensions, Animated } from 'react-na
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { useAmbition } from '../hooks/ambition-store';
+import { useUnifiedUser } from '../lib/unified-user-store';
 
 export default function SplashScreen() {
   const ambitionData = useAmbition();
+  const { user, isRegistered } = useUnifiedUser();
   const [imageLoaded, setImageLoaded] = useState(false);
   
   // Safely destructure with fallbacks
   const goal = ambitionData?.goal || '';
   const roadmap = ambitionData?.roadmap || null;
   const isHydrated = ambitionData?.isHydrated || false;
+  
+  // Check if user is premium
+  const isPremium = user && 
+                    !user.isGuest &&
+                    user.subscriptionPlan && 
+                    user.subscriptionPlan !== 'free' &&
+                    user.subscriptionStatus === 'active' &&
+                    (!user.subscriptionExpiresAt || user.subscriptionExpiresAt > new Date());
 
   const { width } = useWindowDimensions();
   const animatedValue = useRef(new Animated.Value(0)).current;
@@ -64,7 +74,13 @@ export default function SplashScreen() {
           console.log('Existing goal found, navigating to roadmap');
           router.replace('/(main)/roadmap');
         } else {
-          console.log('No existing goal, navigating to welcome');
+          // If premium user has no roadmap, show welcome screen but keep them logged in
+          // They can start a new onboarding without being logged out
+          if (isPremium) {
+            console.log('Premium user with no roadmap, navigating to welcome (staying logged in)');
+          } else {
+            console.log('No existing goal, navigating to welcome');
+          }
           router.replace('/welcome');
         }
       } catch (error) {
@@ -75,7 +91,7 @@ export default function SplashScreen() {
     }, 1000);
 
     return () => clearTimeout(timer);
-  }, [imageLoaded, isHydrated, goal, roadmap]);
+  }, [imageLoaded, isHydrated, goal, roadmap, isPremium]);
 
   // Show loading state until hydrated or if ambition data is not available
   if (!isHydrated || !ambitionData) {

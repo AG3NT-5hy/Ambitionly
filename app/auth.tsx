@@ -1,15 +1,19 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, Animated, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X, Mail, Lock, Eye, EyeOff } from 'lucide-react-native';
 import { useAuth } from '../hooks/auth-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { STORAGE_KEYS } from '../constants';
 
 export default function AuthScreen() {
   const { signup, login, signInWithGoogle, dismissAuthFlow } = useAuth();
   const insets = useSafeAreaInsets();
-  const [isLogin, setIsLogin] = useState<boolean>(false);
+  const params = useLocalSearchParams();
+  // Start in login mode if 'mode=signin' query param is present, or if coming from welcome screen
+  const [isLogin, setIsLogin] = useState<boolean>(params.mode === 'signin' || params.from === 'welcome');
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
@@ -69,12 +73,48 @@ export default function AuthScreen() {
         : await signup(email.trim(), password);
 
       if (success) {
-        router.back();
+        // Wait a bit for data to be restored from server
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Check if user has roadmap and premium status
+        const storedGoal = await AsyncStorage.getItem(STORAGE_KEYS.GOAL);
+        const storedRoadmap = await AsyncStorage.getItem(STORAGE_KEYS.ROADMAP);
+        const hasRoadmap = storedGoal && storedRoadmap;
+        
+        // Check if user is premium
+        const storedUser = await AsyncStorage.getItem(STORAGE_KEYS.USER);
+        let isPremium = false;
+        if (storedUser) {
+          try {
+            const userData = JSON.parse(storedUser);
+            isPremium = userData.subscriptionPlan && 
+                       userData.subscriptionPlan !== 'free' &&
+                       userData.subscriptionStatus === 'active' &&
+                       (!userData.subscriptionExpiresAt || new Date(userData.subscriptionExpiresAt) > new Date());
+          } catch (e) {
+            console.warn('[Auth] Failed to parse user data:', e);
+          }
+        }
+        
+        if (hasRoadmap && isPremium) {
+          // User has roadmap and is premium - go to roadmap
+          router.replace('/(main)/roadmap');
+        } else {
+          // User doesn't have roadmap - go to welcome with message
+          router.replace('/welcome?noRoadmap=true');
+        }
       } else {
         setError(isLogin ? 'Invalid email or password' : 'Failed to create account. Please try again.');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred. Please try again.');
+      const errorMessage = err instanceof Error ? err.message : 'An error occurred. Please try again.';
+      
+      // Check if it's an "already registered" error and provide helpful message
+      if (errorMessage.includes('already registered') || errorMessage.includes('Email already')) {
+        setError('This email is already registered. Please sign in instead, or use a different email address.');
+      } else {
+        setError(errorMessage);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -90,7 +130,36 @@ export default function AuthScreen() {
       const success = await signInWithGoogle();
       
       if (success) {
-        router.back();
+        // Wait a bit for data to be restored from server
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Check if user has roadmap and premium status
+        const storedGoal = await AsyncStorage.getItem(STORAGE_KEYS.GOAL);
+        const storedRoadmap = await AsyncStorage.getItem(STORAGE_KEYS.ROADMAP);
+        const hasRoadmap = storedGoal && storedRoadmap;
+        
+        // Check if user is premium
+        const storedUser = await AsyncStorage.getItem(STORAGE_KEYS.USER);
+        let isPremium = false;
+        if (storedUser) {
+          try {
+            const userData = JSON.parse(storedUser);
+            isPremium = userData.subscriptionPlan && 
+                       userData.subscriptionPlan !== 'free' &&
+                       userData.subscriptionStatus === 'active' &&
+                       (!userData.subscriptionExpiresAt || new Date(userData.subscriptionExpiresAt) > new Date());
+          } catch (e) {
+            console.warn('[Auth] Failed to parse user data:', e);
+          }
+        }
+        
+        if (hasRoadmap && isPremium) {
+          // User has roadmap and is premium - go to roadmap
+          router.replace('/(main)/roadmap');
+        } else {
+          // User doesn't have roadmap - go to welcome with message
+          router.replace('/welcome?noRoadmap=true');
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to sign in with Google');
@@ -105,6 +174,10 @@ export default function AuthScreen() {
   };
 
   const toggleMode = () => {
+    // Prevent toggling if coming from welcome screen (sign in only)
+    if (params.from === 'welcome') {
+      return;
+    }
     setError('');
     setIsLogin(!isLogin);
   };
@@ -246,16 +319,19 @@ export default function AuthScreen() {
                 )}
               </TouchableOpacity>
 
-              <View style={styles.switchContainer}>
-                <Text style={styles.switchText}>
-                  {isLogin ? "Don't have an account?" : 'Already have an account?'}
-                </Text>
-                <TouchableOpacity onPress={toggleMode} disabled={isLoading || isLoadingGoogle}>
-                  <Text style={styles.switchLink}>
-                    {isLogin ? 'Sign Up' : 'Sign In'}
+              {/* Hide toggle if coming from welcome screen (sign in only) */}
+              {params.from !== 'welcome' && (
+                <View style={styles.switchContainer}>
+                  <Text style={styles.switchText}>
+                    {isLogin ? "Don't have an account?" : 'Already have an account?'}
                   </Text>
-                </TouchableOpacity>
-              </View>
+                  <TouchableOpacity onPress={toggleMode} disabled={isLoading || isLoadingGoogle}>
+                    <Text style={styles.switchLink}>
+                      {isLogin ? 'Sign Up' : 'Sign In'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
 
             <View style={styles.benefits}>

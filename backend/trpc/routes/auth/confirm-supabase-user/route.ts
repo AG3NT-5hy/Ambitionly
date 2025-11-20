@@ -20,6 +20,15 @@ export const confirmSupabaseUserProcedure = publicProcedure
     try {
       console.log('[Auth.ConfirmSupabaseUser] Creating Supabase user with auto-confirmation:', input.email);
       
+      // Check if user already exists in database first
+      const existingDbUser = await db.user.findUnique({
+        where: { email: input.email },
+      });
+      
+      if (existingDbUser) {
+        throw new Error('Email already registered');
+      }
+      
       // Try to create user with auto-confirmed email
       // If user already exists, Supabase will return an error which we'll handle
       const { data: supabaseData, error: supabaseError } = await supabaseAdmin.auth.admin.createUser({

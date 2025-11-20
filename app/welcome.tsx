@@ -1,7 +1,7 @@
-import React, { useRef, useEffect, useCallback } from 'react';
+import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { View, Text, StyleSheet, Animated, TouchableOpacity, useWindowDimensions, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFonts, LexendDeca_400Regular, LexendDeca_600SemiBold } from '@expo-google-fonts/lexend-deca';
 
@@ -25,6 +25,40 @@ interface ShootingStar {
 export default function WelcomeScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams();
+  const [showNoRoadmapMessage, setShowNoRoadmapMessage] = useState(false);
+  
+  // Check if we should show the "no roadmap" message
+  useEffect(() => {
+    if (params.noRoadmap === 'true') {
+      setShowNoRoadmapMessage(true);
+      // Hide message after 5 seconds
+      const timer = setTimeout(() => {
+        setShowNoRoadmapMessage(false);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [params.noRoadmap]);
+  
+  // Create dynamic styles based on screen dimensions and insets
+  const dynamicStyles = StyleSheet.create({
+    signInButton: {
+      position: 'absolute',
+      top: Platform.select({
+        ios: insets.top + 10,
+        android: 20,
+        default: 20,
+      }),
+      right: 20,
+      zIndex: 1000,
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderRadius: 20,
+      backgroundColor: 'rgba(139, 92, 246, 0.15)',
+      borderWidth: 1,
+      borderColor: 'rgba(139, 92, 246, 0.3)',
+    },
+  });
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const buttonScale = useRef(new Animated.Value(0.9)).current;
   
@@ -377,10 +411,23 @@ export default function WelcomeScreen() {
     router.push('/onboarding');
   };
 
+  const handleSignIn = () => {
+    router.push('/auth?mode=signin&from=welcome');
+  };
+
   const titleFontFamily = fontsLoaded ? 'LexendDeca_600SemiBold' : 'System';
 
   return (
     <View style={styles.container}>
+      {/* Subtle Sign In button in top right */}
+      <TouchableOpacity
+        style={dynamicStyles.signInButton}
+        onPress={handleSignIn}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.signInButtonText}>Sign In</Text>
+      </TouchableOpacity>
+      
       {/* Original flowing background */}
       <LinearGradient
         colors={['#000000', '#29202B', '#000000']}
@@ -545,6 +592,13 @@ export default function WelcomeScreen() {
               }
             ]}
           >
+            {showNoRoadmapMessage && (
+              <View style={styles.noRoadmapMessage}>
+                <Text style={styles.noRoadmapMessageText}>
+                  You don't have a goal/roadmap yet. Start your journey below!
+                </Text>
+              </View>
+            )}
             <Text style={styles.descriptionText}>
               Your AI coach to transform goals into action
             </Text>
@@ -839,5 +893,27 @@ const createStyles = (screenWidth: number, screenHeight: number) => StyleSheet.c
   },
   animatedView: {
     // Base style for animated views
+  },
+  signInButtonText: {
+    color: '#B0A8FF',
+    fontSize: 14,
+    fontWeight: '500',
+    letterSpacing: 0.5,
+  },
+  noRoadmapMessage: {
+    backgroundColor: 'rgba(139, 92, 246, 0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.4)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    alignItems: 'center',
+  },
+  noRoadmapMessageText: {
+    color: '#B0A8FF',
+    fontSize: 14,
+    fontWeight: '500',
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });

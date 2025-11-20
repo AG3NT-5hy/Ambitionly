@@ -237,6 +237,7 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         }
 
         if (!createdUser) {
+          // Restore server data (this will also trigger ambition store reload)
           await restoreServerDataToLocal(dbUser);
         }
 
@@ -359,10 +360,34 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
     await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(updatedUser));
   };
 
-  // Restore server data to local storage
+  // Helper function to trigger ambition store reload
+  const triggerAmbitionStoreReload = () => {
+    setTimeout(() => {
+      try {
+        const { DeviceEventEmitter } = require('react-native');
+        DeviceEventEmitter.emit('ambition-storage-reload');
+        console.log('[UnifiedUser] ✅ Triggered ambition store reload');
+      } catch (e) {
+        console.warn('[UnifiedUser] Could not emit storage reload event:', e);
+      }
+    }, 300);
+  };
+
+  // Restore server data to local storage (only for premium users)
   const restoreServerDataToLocal = async (dbUser: any) => {
     try {
-      console.log('[UnifiedUser] Restoring server data to local storage...');
+      // Check if user has premium subscription
+      const hasPremium = dbUser.subscriptionPlan && 
+                        dbUser.subscriptionPlan !== 'free' &&
+                        dbUser.subscriptionStatus === 'active' &&
+                        (!dbUser.subscriptionExpiresAt || new Date(dbUser.subscriptionExpiresAt) > new Date());
+      
+      if (!hasPremium) {
+        console.log('[UnifiedUser] User does not have premium subscription, skipping cloud data restoration');
+        return;
+      }
+      
+      console.log('[UnifiedUser] Restoring server data to local storage (premium user)...');
       
       const restorePromises: Promise<void>[] = [];
       
@@ -394,6 +419,9 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       
       await Promise.all(restorePromises);
       console.log('[UnifiedUser] ✅ Server data restored to local storage');
+      
+      // Trigger ambition store reload to load the restored data
+      triggerAmbitionStoreReload();
     } catch (error) {
       console.error('[UnifiedUser] Error restoring server data:', error);
       // Don't throw - continue with sign in even if restore fails
@@ -475,28 +503,10 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
           errorMessage.includes('Bad Gateway') ||
           errorMessage.includes('Service Unavailable');
         
-        // If it's a network error, we'll fall back to Supabase signup
-        // If it's "user already exists", we'll try to sign in with Supabase
+        // If email is already registered, throw error to prevent duplicate signup
         if (errorMessage.includes('already registered') || errorMessage.includes('Email already')) {
-          console.log('[UnifiedUser] User already exists in backend, attempting sign in with Supabase...');
-          // Try to sign in with Supabase to get the user ID
-          try {
-            const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-              email,
-              password,
-            });
-            if (signInError) {
-              // If sign in fails, try creating with Supabase directly
-              console.log('[UnifiedUser] Supabase sign in failed, will create user directly:', signInError);
-            } else if (signInData.user) {
-              supabaseUserId = signInData.user.id;
-              backendSignupSucceeded = true; // User exists, continue with flow
-              console.log('[UnifiedUser] ✅ Signed in with existing Supabase user');
-            }
-          } catch (signInErr) {
-            console.warn('[UnifiedUser] Error during Supabase sign in:', signInErr);
-            // Continue to create user directly
-          }
+          console.log('[UnifiedUser] Email already registered, preventing duplicate signup');
+          throw new Error('This email is already registered. Please sign in instead.');
         }
         
         // If it's not a network error and not "user already exists", throw the error
@@ -528,8 +538,14 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
             throw new Error('Failed to create Supabase user via backend endpoint');
           }
         } catch (confirmError: any) {
-          console.warn('[UnifiedUser] Backend confirm endpoint failed, falling back to direct Supabase signup:', confirmError);
           const confirmMessage = confirmError?.message || String(confirmError);
+          
+          // Check if email is already registered
+          if (confirmMessage.includes('already registered') || confirmMessage.includes('Email already') || confirmMessage.includes('already exists')) {
+            throw new Error('This email is already registered. Please sign in instead.');
+          }
+          
+          console.warn('[UnifiedUser] Backend confirm endpoint failed, falling back to direct Supabase signup:', confirmError);
           const isTransformError = confirmMessage.includes('Unable to transform response') ||
             confirmMessage.includes('Invalid input: expected object') ||
             confirmMessage.includes('Transformation error (deserialize)');
@@ -550,24 +566,10 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
             
             // Provide user-friendly error messages
             if (authError.message.includes('User already registered') || 
-                authError.message.includes('already registered')) {
-              // User exists in Supabase, try to sign in
-              console.log('[UnifiedUser] User exists in Supabase, attempting sign in...');
-              const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-                email,
-                password,
-              });
-              
-              if (signInError) {
-                throw new Error('This email is already registered. Please sign in instead, or check your password.');
-              }
-              
-              if (signInData.user) {
-                supabaseUserId = signInData.user.id;
-                console.log('[UnifiedUser] ✅ Signed in with existing Supabase user');
-              } else {
-                throw new Error('Failed to sign in with existing account');
-              }
+                authError.message.includes('already registered') ||
+                authError.message.includes('already exists')) {
+              // User exists - prevent duplicate signup
+              throw new Error('This email is already registered. Please sign in instead.');
             } else {
               throw new Error(authError.message || 'Failed to create user account');
             }
@@ -791,7 +793,7 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         throw new Error('User data not found in database');
       }
       
-      // 4. Restore server data to local storage
+      // 4. Restore server data to local storage (this will also trigger ambition store reload)
       await restoreServerDataToLocal(dbUser);
       
       // 5. Create user object
@@ -866,10 +868,55 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         console.warn('[UnifiedUser] RevenueCat logout failed:', rcError);
       }
       
-      // 3. Create new guest user
-      await createGuestUser();
+      // 3. Clear ALL user data from AsyncStorage
+      console.log('[UnifiedUser] Clearing all user data from storage...');
+      await Promise.all([
+        // Clear unified user data
+        AsyncStorage.removeItem(STORAGE_KEYS.USER),
+        AsyncStorage.removeItem(STORAGE_KEYS.GUEST_ID),
+        // Clear all ambition/roadmap data
+        AsyncStorage.removeItem(STORAGE_KEYS.GOAL),
+        AsyncStorage.removeItem(STORAGE_KEYS.TIMELINE),
+        AsyncStorage.removeItem(STORAGE_KEYS.TIME_COMMITMENT),
+        AsyncStorage.removeItem(STORAGE_KEYS.ANSWERS),
+        AsyncStorage.removeItem(STORAGE_KEYS.ROADMAP),
+        AsyncStorage.removeItem(STORAGE_KEYS.COMPLETED_TASKS),
+        AsyncStorage.removeItem(STORAGE_KEYS.STREAK_DATA),
+        AsyncStorage.removeItem(STORAGE_KEYS.TASK_TIMERS),
+        // Clear auth tokens from auth-store
+        AsyncStorage.removeItem('ambitionly_auth_token'),
+        AsyncStorage.removeItem('ambitionly_user_email'),
+        AsyncStorage.removeItem('ambitionly_user_id'),
+        // Clear old user-store data if it exists
+        AsyncStorage.removeItem('ambitionly_user'),
+      ]);
       
-      console.log('[UnifiedUser] ✅ Signed out, new guest session created');
+      // 4. Reset internal state
+      setUserInternal(null);
+      
+      // 5. Create fresh guest user with new ID
+      const newGuestId = generateGuestId();
+      await AsyncStorage.setItem(STORAGE_KEYS.GUEST_ID, newGuestId);
+      
+      const guestUser: UnifiedUser = {
+        id: newGuestId,
+        email: null,
+        name: null,
+        username: null,
+        profilePicture: null,
+        mode: 'guest',
+        isGuest: true,
+        createdAt: new Date(),
+        subscriptionPlan: 'free',
+        subscriptionStatus: null,
+        subscriptionExpiresAt: null,
+        subscriptionPurchasedAt: null,
+      };
+      
+      setUserInternal(guestUser);
+      await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(guestUser));
+      
+      console.log('[UnifiedUser] ✅ Signed out, fresh guest session created');
     } catch (error) {
       console.error('[UnifiedUser] Sign out error:', error);
       throw error;
@@ -908,6 +955,19 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
   }) => {
     if (!user) throw new Error('No user session');
     
+    // Check if user is upgrading to premium (was free/inactive, now premium/active)
+    const wasPremium = user.subscriptionPlan && 
+                      user.subscriptionPlan !== 'free' &&
+                      user.subscriptionStatus === 'active' &&
+                      (!user.subscriptionExpiresAt || user.subscriptionExpiresAt > new Date());
+    
+    const isNowPremium = subscriptionData.plan && 
+                        subscriptionData.plan !== 'free' &&
+                        subscriptionData.status === 'active' &&
+                        (!subscriptionData.expiresAt || subscriptionData.expiresAt > new Date());
+    
+    const justBecamePremium = !wasPremium && isNowPremium;
+    
     const updatedUser: UnifiedUser = {
       ...user,
       subscriptionPlan: subscriptionData.plan,
@@ -923,6 +983,21 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       await syncToDatabase(updatedUser);
     }
     
+    // If user just became premium, trigger ambition data sync
+    if (justBecamePremium && !user.isGuest) {
+      console.log('[UnifiedUser] User just became premium, triggering ambition data sync...');
+      // Use event emitter to trigger sync in ambition store
+      setTimeout(() => {
+        try {
+          const { DeviceEventEmitter } = require('react-native');
+          DeviceEventEmitter.emit('ambition-sync-trigger');
+          console.log('[UnifiedUser] ✅ Triggered ambition data sync');
+        } catch (error) {
+          console.warn('[UnifiedUser] Failed to trigger ambition sync:', error);
+        }
+      }, 500); // Small delay to ensure user state is saved
+    }
+    
     console.log('[UnifiedUser] Subscription updated');
   }, [user]);
 
@@ -933,8 +1008,19 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       return;
     }
     
+    // Check if user has premium subscription
+    const hasPremium = userData.subscriptionPlan && 
+                      userData.subscriptionPlan !== 'free' &&
+                      userData.subscriptionStatus === 'active' &&
+                      (!userData.subscriptionExpiresAt || userData.subscriptionExpiresAt > new Date());
+    
+    if (!hasPremium) {
+      console.log('[UnifiedUser] User does not have premium subscription, skipping cloud sync');
+      return;
+    }
+    
     try {
-      console.log('[UnifiedUser] Syncing to database:', userData.email);
+      console.log('[UnifiedUser] Syncing to database (premium user):', userData.email);
       
       await updateUserMutation.mutateAsync({
         email: userData.email!,

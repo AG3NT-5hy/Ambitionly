@@ -36,9 +36,9 @@ interface PaywallScreenProps {
 
 export default function PaywallScreen({ onClose, onSubscribe, onShowSignUp }: PaywallScreenProps) {
   const { width, height } = useWindowDimensions();
-  const { purchaseSubscription, restoreSubscription, getAnnualSavings, syncRevenueCatStatus } = useSubscription();
+  const { purchaseSubscription, restoreSubscription, getAnnualSavings, syncRevenueCatStatus, subscriptionState } = useSubscription();
   const { showToast } = useUi();
-  const { isRegistered } = useUnifiedUser();
+  const { isRegistered, updateSubscription } = useUnifiedUser();
   const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan>('annual');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [purchaseCompleted, setPurchaseCompleted] = useState<boolean>(false);
@@ -636,6 +636,29 @@ export default function PaywallScreen({ onClose, onSubscribe, onShowSignUp }: Pa
         if (customerInfo.entitlements.active.premium_access) {
           // Sync subscription state with RevenueCat
           await syncRevenueCatStatus();
+          
+          // Update unified user store with subscription info
+          const entitlement = customerInfo.entitlements.active.premium_access;
+          let plan: SubscriptionPlan = 'annual';
+          const productId = entitlement.productIdentifier?.toLowerCase() || '';
+          if (productId.includes('monthly') || productId.includes('month')) {
+            plan = 'monthly';
+          } else if (productId.includes('annual') || productId.includes('year')) {
+            plan = 'annual';
+          } else if (productId.includes('lifetime')) {
+            plan = 'lifetime';
+          }
+          
+          try {
+            await updateSubscription({
+              plan,
+              status: 'active',
+              expiresAt: entitlement.expirationDate ? new Date(entitlement.expirationDate) : null,
+              purchasedAt: entitlement.originalPurchaseDate ? new Date(entitlement.originalPurchaseDate) : new Date(),
+            });
+          } catch (error) {
+            console.warn('[Paywall] Failed to update unified user subscription:', error);
+          }
           
           showToast('✅ Premium unlocked!', 'success');
           setPurchaseCompleted(true);

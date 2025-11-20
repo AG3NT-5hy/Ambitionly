@@ -237,11 +237,7 @@ export default function SettingsScreen() {
                   title={accountTitle}
                   subtitle={accountSubtitle}
                   onPress={() => {
-                    if (isGuest) {
-                      router.push('/login');
-                    } else {
-                      router.push('/(main)/account');
-                    }
+                    router.push('/(main)/account');
                   }}
                   showChevron
                 />
@@ -262,9 +258,13 @@ export default function SettingsScreen() {
                             onPress: async () => {
                               try {
                                 await unifiedSignOut();
+                                // Small delay to ensure all state is cleared
+                                await new Promise(resolve => setTimeout(resolve, 100));
                                 showToast('Signed out successfully', 'success');
+                                // Use replace to prevent going back
                                 router.replace('/welcome');
-                              } catch {
+                              } catch (error) {
+                                console.error('Sign out error:', error);
                                 showToast('Failed to sign out', 'error');
                               }
                             },
