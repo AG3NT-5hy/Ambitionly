@@ -73,13 +73,39 @@ export default function AuthScreen() {
         : await signup(email.trim(), password);
 
       if (success) {
-        // Wait a bit for data to be restored from server
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Wait longer for data to be restored from server and ambition store to reload
+        // restoreServerDataToLocal writes to AsyncStorage, then triggers reload with 300ms delay
+        // We need to wait for both the write and the reload to complete
+        await new Promise(resolve => setTimeout(resolve, 1500));
         
         // Check if user has roadmap and premium status
-        const storedGoal = await AsyncStorage.getItem(STORAGE_KEYS.GOAL);
-        const storedRoadmap = await AsyncStorage.getItem(STORAGE_KEYS.ROADMAP);
-        const hasRoadmap = storedGoal && storedRoadmap;
+        // Try multiple times with retries in case data is still loading
+        let storedGoal: string | null = null;
+        let storedRoadmap: string | null = null;
+        let hasRoadmap = false;
+        
+        for (let attempt = 0; attempt < 3; attempt++) {
+          storedGoal = await AsyncStorage.getItem(STORAGE_KEYS.GOAL);
+          storedRoadmap = await AsyncStorage.getItem(STORAGE_KEYS.ROADMAP);
+          hasRoadmap = !!(storedGoal && storedRoadmap);
+          
+          if (hasRoadmap) {
+            console.log(`[Auth] Roadmap found on attempt ${attempt + 1}`);
+            break;
+          }
+          
+          if (attempt < 2) {
+            console.log(`[Auth] Roadmap not found on attempt ${attempt + 1}, waiting and retrying...`);
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        }
+        
+        console.log('[Auth] Final check:', {
+          hasGoal: !!storedGoal,
+          hasRoadmap: !!storedRoadmap,
+          goalLength: storedGoal?.length || 0,
+          roadmapLength: storedRoadmap?.length || 0,
+        });
         
         // Check if user is premium
         const storedUser = await AsyncStorage.getItem(STORAGE_KEYS.USER);
@@ -91,6 +117,12 @@ export default function AuthScreen() {
                        userData.subscriptionPlan !== 'free' &&
                        userData.subscriptionStatus === 'active' &&
                        (!userData.subscriptionExpiresAt || new Date(userData.subscriptionExpiresAt) > new Date());
+            console.log('[Auth] Premium check:', {
+              plan: userData.subscriptionPlan,
+              status: userData.subscriptionStatus,
+              expiresAt: userData.subscriptionExpiresAt,
+              isPremium,
+            });
           } catch (e) {
             console.warn('[Auth] Failed to parse user data:', e);
           }
@@ -98,9 +130,11 @@ export default function AuthScreen() {
         
         if (hasRoadmap && isPremium) {
           // User has roadmap and is premium - go to roadmap
+          console.log('[Auth] Navigating to roadmap (has roadmap and premium)');
           router.replace('/(main)/roadmap');
         } else {
           // User doesn't have roadmap - go to welcome with message
+          console.log('[Auth] Navigating to welcome:', { hasRoadmap, isPremium });
           router.replace('/welcome?noRoadmap=true');
         }
       } else {
@@ -109,9 +143,11 @@ export default function AuthScreen() {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'An error occurred. Please try again.';
       
-      // Check if it's an "already registered" error and provide helpful message
-      if (errorMessage.includes('already registered') || errorMessage.includes('Email already')) {
-        setError('This email is already registered. Please sign in instead, or use a different email address.');
+      // Check if it's an "already registered" error and automatically switch to sign-in
+      if (errorMessage.includes('already registered') || errorMessage.includes('Email already') || errorMessage.includes('already exists')) {
+        // Switch to sign-in mode automatically
+        setIsLogin(true);
+        setError('This email is already registered. We\'ve switched you to sign in. Please enter your password to continue.');
       } else {
         setError(errorMessage);
       }
@@ -130,13 +166,39 @@ export default function AuthScreen() {
       const success = await signInWithGoogle();
       
       if (success) {
-        // Wait a bit for data to be restored from server
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Wait longer for data to be restored from server and ambition store to reload
+        // restoreServerDataToLocal writes to AsyncStorage, then triggers reload with 300ms delay
+        // We need to wait for both the write and the reload to complete
+        await new Promise(resolve => setTimeout(resolve, 1500));
         
         // Check if user has roadmap and premium status
-        const storedGoal = await AsyncStorage.getItem(STORAGE_KEYS.GOAL);
-        const storedRoadmap = await AsyncStorage.getItem(STORAGE_KEYS.ROADMAP);
-        const hasRoadmap = storedGoal && storedRoadmap;
+        // Try multiple times with retries in case data is still loading
+        let storedGoal: string | null = null;
+        let storedRoadmap: string | null = null;
+        let hasRoadmap = false;
+        
+        for (let attempt = 0; attempt < 3; attempt++) {
+          storedGoal = await AsyncStorage.getItem(STORAGE_KEYS.GOAL);
+          storedRoadmap = await AsyncStorage.getItem(STORAGE_KEYS.ROADMAP);
+          hasRoadmap = !!(storedGoal && storedRoadmap);
+          
+          if (hasRoadmap) {
+            console.log(`[Auth] Roadmap found on attempt ${attempt + 1}`);
+            break;
+          }
+          
+          if (attempt < 2) {
+            console.log(`[Auth] Roadmap not found on attempt ${attempt + 1}, waiting and retrying...`);
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        }
+        
+        console.log('[Auth] Final check (Google):', {
+          hasGoal: !!storedGoal,
+          hasRoadmap: !!storedRoadmap,
+          goalLength: storedGoal?.length || 0,
+          roadmapLength: storedRoadmap?.length || 0,
+        });
         
         // Check if user is premium
         const storedUser = await AsyncStorage.getItem(STORAGE_KEYS.USER);
@@ -148,6 +210,12 @@ export default function AuthScreen() {
                        userData.subscriptionPlan !== 'free' &&
                        userData.subscriptionStatus === 'active' &&
                        (!userData.subscriptionExpiresAt || new Date(userData.subscriptionExpiresAt) > new Date());
+            console.log('[Auth] Premium check (Google):', {
+              plan: userData.subscriptionPlan,
+              status: userData.subscriptionStatus,
+              expiresAt: userData.subscriptionExpiresAt,
+              isPremium,
+            });
           } catch (e) {
             console.warn('[Auth] Failed to parse user data:', e);
           }
@@ -155,9 +223,11 @@ export default function AuthScreen() {
         
         if (hasRoadmap && isPremium) {
           // User has roadmap and is premium - go to roadmap
+          console.log('[Auth] Navigating to roadmap (Google - has roadmap and premium)');
           router.replace('/(main)/roadmap');
         } else {
           // User doesn't have roadmap - go to welcome with message
+          console.log('[Auth] Navigating to welcome (Google):', { hasRoadmap, isPremium });
           router.replace('/welcome?noRoadmap=true');
         }
       }
@@ -271,7 +341,14 @@ export default function AuthScreen() {
               </View>
 
               {error ? (
-                <Text style={styles.errorText}>{error}</Text>
+                <View style={styles.errorContainer}>
+                  <Text style={styles.errorText}>{error}</Text>
+                  {error.includes('already registered') && isLogin && (
+                    <Text style={styles.errorHint}>
+                      Your email has been preserved. Just enter your password above to sign in.
+                    </Text>
+                  )}
+                </View>
               ) : null}
 
               <TouchableOpacity
@@ -416,11 +493,20 @@ const styles = StyleSheet.create({
   eyeIcon: {
     padding: 8,
   },
+  errorContainer: {
+    marginBottom: 16,
+  },
   errorText: {
     color: '#FF6B6B',
     fontSize: 14,
-    marginBottom: 16,
+    marginBottom: 8,
     textAlign: 'center' as const,
+  },
+  errorHint: {
+    color: '#B0A8FF',
+    fontSize: 12,
+    textAlign: 'center' as const,
+    marginTop: 4,
   },
   submitButton: {
     borderRadius: 24,

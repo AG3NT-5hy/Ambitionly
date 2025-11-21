@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated, ScrollView, Platform, Modal } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Animated, ScrollView, Platform, Modal, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Target, Flame, ChevronRight, Play, Clock, Lock } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -46,12 +46,13 @@ export default function RoadmapScreen() {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
   const insets = useSafeAreaInsets();
-  const [, setCurrentTime] = useState(Date.now());
+  const [currentTime, setCurrentTime] = useState(Date.now());
   const [showPaywallModal, setShowPaywallModal] = useState<boolean>(false);
   const [paywallDismissed, setPaywallDismissed] = useState<boolean>(false);
   const [showSignUpModal, setShowSignUpModal] = useState<boolean>(false);
   const shouldShowSignUp = !isRegistered;
   const [hasCheckedSignUp, setHasCheckedSignUp] = useState<boolean>(false);
+  const [startingTimer, setStartingTimer] = useState<string | null>(null);
   
   // Track the current task to prevent unexpected changes
   const currentTaskRef = useRef<Task | null>(null);
@@ -232,13 +233,34 @@ export default function RoadmapScreen() {
   const displayTask = stableTask || todaysTask;
 
   const handleStartTimer = useCallback(async (taskId: string, estimatedTime: string) => {
+    // Prevent multiple simultaneous starts
+    if (startingTimer === taskId) {
+      console.log('[Roadmap] Timer already starting for this task, ignoring duplicate click');
+      return;
+    }
+    
     if (!estimatedTime?.trim()) {
       console.warn('Invalid estimated time provided');
       return;
     }
+    
     const sanitizedTime = estimatedTime.trim().slice(0, 20);
-    await startTaskTimer(taskId, sanitizedTime);
-  }, [startTaskTimer]);
+    
+    try {
+      setStartingTimer(taskId);
+      console.log(`[Roadmap] Starting timer for task ${taskId} with time: ${sanitizedTime}`);
+      await startTaskTimer(taskId, sanitizedTime);
+      console.log(`[Roadmap] Timer started successfully`);
+    } catch (error) {
+      console.error('[Roadmap] Error starting timer:', error);
+      showToast('Failed to start timer. Please try again.', 'error');
+    } finally {
+      // Small delay to prevent rapid re-clicks
+      setTimeout(() => {
+        setStartingTimer(null);
+      }, 500);
+    }
+  }, [startTaskTimer, startingTimer, showToast]);
 
   const handleTaskToggle = useCallback(async (taskId: string) => {
     try {
@@ -316,7 +338,7 @@ export default function RoadmapScreen() {
     
     if (!timer || timer.isCompleted || !timer.isActive) return null;
     
-    // Get fresh progress data using current time
+    // Get fresh progress data using current time - currentTime dependency ensures smooth updates
     const progress = getTaskTimerProgress(taskId);
     const isTimerComplete = isTaskTimerComplete(taskId);
     
@@ -333,7 +355,7 @@ export default function RoadmapScreen() {
         </View>
       </View>
     );
-  }, [getTaskTimer, getTaskTimerProgress, isTaskTimerComplete, formatTimeRemaining]);
+  }, [getTaskTimer, getTaskTimerProgress, isTaskTimerComplete, formatTimeRemaining, currentTime]);
 
   if (!roadmap) {
     return (
@@ -438,19 +460,31 @@ export default function RoadmapScreen() {
                     }
                     
                     if (!isTimerActive) {
+                      const isStarting = startingTimer === todaysTask.id;
                       return (
                         <TouchableOpacity
-                          style={styles.startTimerButton}
+                          style={[styles.startTimerButton, isStarting && styles.startTimerButtonDisabled]}
                           onPress={() => {
+                            if (isStarting) return; // Prevent multiple clicks
                             const timeToUse = todaysTask.estimatedTime || '20 min';
                             console.log(`[Roadmap] Starting timer with time: "${timeToUse}" (original: "${todaysTask.estimatedTime}")`);
                             handleStartTimer(todaysTask.id, timeToUse);
                           }}
+                          disabled={isStarting}
                           accessibilityLabel="Start task timer"
                           testID="start-timer"
                         >
-                          <Play size={16} color="#FFFFFF" />
-                          <Text style={styles.startTimerButtonText}>Start Task</Text>
+                          {isStarting ? (
+                            <>
+                              <ActivityIndicator size="small" color="#FFFFFF" />
+                              <Text style={styles.startTimerButtonText}>Starting...</Text>
+                            </>
+                          ) : (
+                            <>
+                              <Play size={16} color="#FFFFFF" />
+                              <Text style={styles.startTimerButtonText}>Start Task</Text>
+                            </>
+                          )}
                         </TouchableOpacity>
                       );
                     }
@@ -799,6 +833,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  startTimerButtonDisabled: {
+    opacity: 0.6,
   },
   startTimerButtonText: {
     fontSize: 16,

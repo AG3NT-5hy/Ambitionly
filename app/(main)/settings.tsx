@@ -237,7 +237,7 @@ export default function SettingsScreen() {
                   title={accountTitle}
                   subtitle={accountSubtitle}
                   onPress={() => {
-                    router.push('/(main)/account');
+                      router.push('/(main)/account');
                   }}
                   showChevron
                 />
@@ -396,7 +396,7 @@ export default function SettingsScreen() {
           }}
           onShowSignUp={() => {
             setShowPaywallModal(false);
-            router.push('/login');
+            router.push('/auth?mode=signup&from=settings');
           }}
         />
       </Modal>

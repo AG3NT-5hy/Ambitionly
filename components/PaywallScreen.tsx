@@ -533,7 +533,7 @@ export default function PaywallScreen({ onClose, onSubscribe, onShowSignUp }: Pa
               } else {
                 // Fallback: navigate to login/signup
                 onClose();
-                router.push('/login');
+                router.push('/auth?mode=signup&from=paywall');
               }
             },
           },
@@ -616,7 +616,7 @@ export default function PaywallScreen({ onClose, onSubscribe, onShowSignUp }: Pa
               } else {
                 // Fallback: navigate to login/signup
                 onClose();
-                router.push('/login');
+                router.push('/auth?mode=signup&from=paywall');
               }
             },
           },

@@ -419,6 +419,13 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       
       await Promise.all(restorePromises);
       console.log('[UnifiedUser] ✅ Server data restored to local storage');
+      console.log('[UnifiedUser] Restored data summary:', {
+        hasGoal: !!dbUser.goal,
+        hasRoadmap: !!dbUser.roadmap,
+        hasCompletedTasks: !!dbUser.completedTasks,
+        goalLength: dbUser.goal?.length || 0,
+        roadmapLength: dbUser.roadmap?.length || 0,
+      });
       
       // Trigger ambition store reload to load the restored data
       triggerAmbitionStoreReload();
@@ -794,6 +801,17 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       }
       
       // 4. Restore server data to local storage (this will also trigger ambition store reload)
+      console.log('[UnifiedUser] About to restore server data, dbUser:', {
+        id: dbUser.id,
+        email: dbUser.email,
+        hasGoal: !!dbUser.goal,
+        hasRoadmap: !!dbUser.roadmap,
+        hasCompletedTasks: !!dbUser.completedTasks,
+        subscriptionPlan: dbUser.subscriptionPlan,
+        subscriptionStatus: dbUser.subscriptionStatus,
+        goalLength: dbUser.goal?.length || 0,
+        roadmapLength: dbUser.roadmap?.length || 0,
+      });
       await restoreServerDataToLocal(dbUser);
       
       // 5. Create user object
@@ -915,6 +933,11 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       
       setUserInternal(guestUser);
       await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(guestUser));
+      
+      // 6. Clear ambition store in-memory state
+      const { DeviceEventEmitter } = require('react-native');
+      DeviceEventEmitter.emit('ambition-clear-all');
+      console.log('[UnifiedUser] Emitted ambition-clear-all event');
       
       console.log('[UnifiedUser] ✅ Signed out, fresh guest session created');
     } catch (error) {

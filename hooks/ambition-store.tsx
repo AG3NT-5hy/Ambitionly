@@ -305,9 +305,35 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
       loadDataFromStorage();
     };
 
+    // Listen for clear all event (triggered on sign-out)
+    const handleClearAll = async () => {
+      console.log('[Ambition] Clear all event received, clearing in-memory state...');
+      
+      // Cancel all notifications when clearing data on sign-out
+      try {
+        const { NotificationService } = await import('../lib/notifications');
+        await NotificationService.cancelAllTaskTimerNotifications();
+        console.log('[Ambition] ✅ Cancelled all task timer notifications on sign-out');
+      } catch (error) {
+        console.warn('[Ambition] Failed to cancel notifications on sign-out:', error);
+      }
+      
+      // Clear all in-memory state immediately
+      setGoalState('');
+      setTimelineState('');
+      setTimeCommitmentState('');
+      setAnswersState([]);
+      setRoadmapState(null);
+      setCompletedTasksState([]);
+      setStreakDataState({ lastCompletionDate: '', streak: 0 });
+      setTaskTimersState([]);
+      console.log('[Ambition] ✅ In-memory state cleared');
+    };
+
     // Listen for React Native DeviceEventEmitter events
     const { DeviceEventEmitter } = require('react-native');
     const reloadSubscription = DeviceEventEmitter.addListener('ambition-storage-reload', handleStorageReload);
+    const clearSubscription = DeviceEventEmitter.addListener('ambition-clear-all', handleClearAll);
     
     // Listen for premium upgrade trigger to sync data
     const syncTriggerHandler = () => {
@@ -318,6 +344,7 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     
     return () => {
       reloadSubscription.remove();
+      clearSubscription.remove();
       syncSubscription.remove();
     };
   }, [loadDataFromStorage, syncAmbitionDataToDatabase]);
@@ -959,6 +986,18 @@ Output ONLY valid JSON in this exact format:
       }
     }
 
+    // Cancel any existing notifications for this task before scheduling a new one
+    // This prevents duplicate notifications if the timer is restarted
+    const existingTimer = taskTimers.find(t => t.taskId === taskId);
+    if (existingTimer?.notificationId) {
+      try {
+        await NotificationService.cancelNotification(existingTimer.notificationId);
+        console.log(`[Timer] Cancelled existing notification for task ${taskId} before scheduling new one`);
+      } catch (error) {
+        console.warn(`[Timer] Failed to cancel existing notification:`, error);
+      }
+    }
+    
     // Schedule notification for when timer completes (in seconds)
     const durationInSeconds = duration * 60;
     
@@ -1272,6 +1311,23 @@ Output ONLY valid JSON in this exact format:
   const resetProgress = async () => {
     try {
       console.log('[Ambition] resetProgress: clearing completed tasks, timers, and streak only');
+      
+      // Cancel all task timer notifications before clearing timers
+      const { NotificationService } = await import('../lib/notifications');
+      await NotificationService.cancelAllTaskTimerNotifications();
+      console.log('[Ambition] ✅ Cancelled all task timer notifications');
+      
+      // Also cancel individual timer notifications if they exist
+      for (const timer of taskTimers) {
+        if (timer.notificationId) {
+          try {
+            await NotificationService.cancelNotification(timer.notificationId);
+          } catch (error) {
+            console.warn(`[Ambition] Failed to cancel notification for timer ${timer.taskId}:`, error);
+          }
+        }
+      }
+      
       await Promise.all([
         AsyncStorage.removeItem(STORAGE_KEYS.COMPLETED_TASKS),
         AsyncStorage.removeItem(STORAGE_KEYS.STREAK_DATA),
@@ -1292,6 +1348,24 @@ Output ONLY valid JSON in this exact format:
   const clearAllData = async () => {
     try {
       console.log('[Ambition] clearAllData: removing all persisted keys');
+      
+      // Cancel ALL task timer notifications before clearing data
+      // This prevents notifications from old roadmaps from firing
+      const { NotificationService } = await import('../lib/notifications');
+      await NotificationService.cancelAllTaskTimerNotifications();
+      console.log('[Ambition] ✅ Cancelled all task timer notifications');
+      
+      // Also cancel individual timer notifications if they exist
+      for (const timer of taskTimers) {
+        if (timer.notificationId) {
+          try {
+            await NotificationService.cancelNotification(timer.notificationId);
+          } catch (error) {
+            console.warn(`[Ambition] Failed to cancel notification for timer ${timer.taskId}:`, error);
+          }
+        }
+      }
+      
       await Promise.all([
         AsyncStorage.removeItem(STORAGE_KEYS.GOAL),
         AsyncStorage.removeItem(STORAGE_KEYS.TIMELINE),

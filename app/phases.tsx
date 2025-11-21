@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Platform, Modal } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Platform, Modal, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { CheckCircle2, Circle, ArrowLeft, Lock, Play, Clock } from 'lucide-react-native';
 import { useAmbition } from '../hooks/ambition-store'
@@ -29,8 +29,9 @@ export default function PhasesScreen() {
   const { showToast } = useUi();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
-  const [, setCurrentTime] = useState(Date.now());
+  const [currentTime, setCurrentTime] = useState(Date.now());
   const [showPaywallModal, setShowPaywallModal] = useState<boolean>(false);
+  const [startingTimer, setStartingTimer] = useState<string | null>(null);
 
   const shouldShowPaywallNow = shouldShowPaywall(completedTasks.length);
 
@@ -81,6 +82,12 @@ export default function PhasesScreen() {
   const handleTaskAction = async (taskId: string, phaseIndex: number, milestoneIndex: number, taskIndex: number, estimatedTime: string) => {
     console.log(`[Phases] handleTaskAction called for task ${taskId}`);
     
+    // Prevent multiple simultaneous starts
+    if (startingTimer === taskId) {
+      console.log(`[Phases] Timer already starting for task ${taskId}, ignoring duplicate click`);
+      return;
+    }
+    
     // Input validation
     if (!estimatedTime?.trim()) {
       console.warn('Invalid estimated time provided');
@@ -123,17 +130,37 @@ export default function PhasesScreen() {
         return;
       }
       
-      console.log(`[Phases] Starting new timer for task ${taskId}`);
-      await startTaskTimer(taskId, sanitizedTime);
-      showToast(`Timer started for ${sanitizedTime}`, 'success');
+      try {
+        setStartingTimer(taskId);
+        console.log(`[Phases] Starting new timer for task ${taskId}`);
+        await startTaskTimer(taskId, sanitizedTime);
+        showToast(`Timer started for ${sanitizedTime}`, 'success');
+      } catch (error) {
+        console.error(`[Phases] Error starting timer:`, error);
+        showToast('Failed to start timer. Please try again.', 'error');
+      } finally {
+        setTimeout(() => {
+          setStartingTimer(null);
+        }, 500);
+      }
       return;
     }
     
     // If timer exists but is not active, start it again
     if (timer && !timer.isActive) {
-      console.log(`[Phases] Restarting inactive timer for task ${taskId}`);
-      await startTaskTimer(taskId, sanitizedTime);
-      showToast(`Timer restarted for ${sanitizedTime}`, 'success');
+      try {
+        setStartingTimer(taskId);
+        console.log(`[Phases] Restarting inactive timer for task ${taskId}`);
+        await startTaskTimer(taskId, sanitizedTime);
+        showToast(`Timer restarted for ${sanitizedTime}`, 'success');
+      } catch (error) {
+        console.error(`[Phases] Error restarting timer:`, error);
+        showToast('Failed to restart timer. Please try again.', 'error');
+      } finally {
+        setTimeout(() => {
+          setStartingTimer(null);
+        }, 500);
+      }
       return;
     }
     
@@ -160,35 +187,49 @@ export default function PhasesScreen() {
   const getTaskButtonContent = (taskId: string, estimatedTime: string) => {
     const timer = getTaskTimer(taskId);
     const isCompleted = completedTasks.includes(taskId);
+    const isStarting = startingTimer === taskId;
     
     if (isCompleted) {
       return {
         icon: <CheckCircle2 size={20} color="#32D583" />,
-        text: 'Completed'
+        text: 'Completed',
+        isLoading: false
+      };
+    }
+    
+    if (isStarting) {
+      return {
+        icon: null,
+        text: 'Starting...',
+        isLoading: true
       };
     }
     
     if (!timer) {
       return {
         icon: <Play size={16} color="#00E6E6" />,
-        text: `Start (${estimatedTime})`
+        text: `Start (${estimatedTime})`,
+        isLoading: false
       };
     }
     
     if (isTaskTimerComplete(taskId)) {
       return {
         icon: <CheckCircle2 size={20} color="#32D583" />,
-        text: 'Mark Complete'
+        text: 'Mark Complete',
+        isLoading: false
       };
     }
     
+    // Use currentTime to ensure smooth timer updates
     const progress = getTaskTimerProgress(taskId);
     const remainingMs = progress.total - progress.elapsed;
     const remainingMinutes = Math.ceil(remainingMs / (1000 * 60));
     
     return {
       icon: <Clock size={16} color="#FFA500" />,
-      text: `${remainingMinutes}m left`
+      text: `${remainingMinutes}m left`,
+      isLoading: false
     };
   };
 
@@ -367,7 +408,11 @@ export default function PhasesScreen() {
                                           const buttonContent = getTaskButtonContent(task.id, task.estimatedTime);
                                           return (
                                             <View style={styles.taskButtonContent}>
-                                              {buttonContent.icon}
+                                              {buttonContent.isLoading ? (
+                                                <ActivityIndicator size="small" color="#00E6E6" />
+                                              ) : (
+                                                buttonContent.icon
+                                              )}
                                               <Text style={[
                                                 styles.taskButtonText,
                                                 isCompleted && styles.taskButtonTextCompleted
@@ -451,7 +496,7 @@ export default function PhasesScreen() {
           }}
           onShowSignUp={() => {
             setShowPaywallModal(false);
-            router.push('/login');
+            router.push('/auth?mode=signup&from=phases');
           }}
         />
       </Modal>

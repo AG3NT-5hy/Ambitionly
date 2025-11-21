@@ -1,14 +1,17 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, StyleSheet, Image, useWindowDimensions, Animated } from 'react-native';
+import { View, StyleSheet, Image, useWindowDimensions, Animated, AppState, AppStateStatus } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
+import { router, useSegments } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAmbition } from '../hooks/ambition-store';
 import { useUnifiedUser } from '../lib/unified-user-store';
 
 export default function SplashScreen() {
   const ambitionData = useAmbition();
-  const { user, isRegistered } = useUnifiedUser();
+  const { user, isRegistered, isHydrated: userHydrated } = useUnifiedUser();
   const [imageLoaded, setImageLoaded] = useState(false);
+  const hasNavigatedRef = useRef(false);
+  const segments = useSegments();
   
   // Safely destructure with fallbacks
   const goal = ambitionData?.goal || '';
@@ -22,6 +25,10 @@ export default function SplashScreen() {
                     user.subscriptionPlan !== 'free' &&
                     user.subscriptionStatus === 'active' &&
                     (!user.subscriptionExpiresAt || user.subscriptionExpiresAt > new Date());
+  
+  // Track if we're already on a valid route (not the splash screen)
+  // segments will be empty array [''] for index route, or ['(main)', 'roadmap'] etc for other routes
+  const isOnValidRoute = segments.length > 0 && segments[0] !== '' && segments[0] !== 'index';
 
   const { width } = useWindowDimensions();
   const animatedValue = useRef(new Animated.Value(0)).current;
@@ -63,35 +70,83 @@ export default function SplashScreen() {
     };
   }, [animatedValue, fadeValue]);
 
+  // Handle app state changes - prevent navigation when app returns from background if already on valid route
   useEffect(() => {
-    if (!imageLoaded || !isHydrated) return;
+    const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
+      if (nextAppState === 'active' && isOnValidRoute && hasNavigatedRef.current) {
+        console.log('[Splash] App returned to foreground, already on valid route:', segments);
+        // Don't navigate if we're already on a valid route
+        return;
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [isOnValidRoute, segments]);
+
+  useEffect(() => {
+    // Don't navigate if already on a valid route (app returned from background)
+    if (isOnValidRoute && hasNavigatedRef.current) {
+      console.log('[Splash] Already on valid route, skipping navigation');
+      return;
+    }
     
-    const timer = setTimeout(() => {
+    // Wait for both stores to be fully hydrated
+    if (!imageLoaded || !isHydrated || !userHydrated) {
+      console.log('[Splash] Waiting for hydration:', { imageLoaded, isHydrated, userHydrated });
+      return;
+    }
+    
+    // Prevent multiple navigations
+    if (hasNavigatedRef.current) {
+      console.log('[Splash] Already navigated, skipping');
+      return;
+    }
+    
+    const timer = setTimeout(async () => {
       try {
-        // Check if user has existing goal and roadmap
-        // Add null checks to prevent undefined errors
-        if (goal && roadmap && typeof goal === 'string' && typeof roadmap === 'object') {
-          console.log('Existing goal found, navigating to roadmap');
+        // Check AsyncStorage directly to avoid stale in-memory state
+        const { STORAGE_KEYS } = await import('../constants');
+        const storedGoal = await AsyncStorage.getItem(STORAGE_KEYS.GOAL);
+        const storedRoadmap = await AsyncStorage.getItem(STORAGE_KEYS.ROADMAP);
+        
+        // Parse roadmap if it exists
+        let parsedRoadmap = null;
+        if (storedRoadmap) {
+          try {
+            parsedRoadmap = JSON.parse(storedRoadmap);
+          } catch (e) {
+            console.warn('Failed to parse stored roadmap:', e);
+          }
+        }
+        
+        // Only navigate to roadmap if we have both goal and roadmap in storage
+        if (storedGoal && parsedRoadmap && typeof storedGoal === 'string' && typeof parsedRoadmap === 'object' && parsedRoadmap.phases) {
+          console.log('[Splash] Existing goal found in storage, navigating to roadmap');
+          hasNavigatedRef.current = true;
           router.replace('/(main)/roadmap');
         } else {
           // If premium user has no roadmap, show welcome screen but keep them logged in
           // They can start a new onboarding without being logged out
           if (isPremium) {
-            console.log('Premium user with no roadmap, navigating to welcome (staying logged in)');
+            console.log('[Splash] Premium user with no roadmap, navigating to welcome (staying logged in)');
           } else {
-            console.log('No existing goal, navigating to welcome');
+            console.log('[Splash] No existing goal in storage, navigating to welcome');
           }
+          hasNavigatedRef.current = true;
           router.replace('/welcome');
         }
       } catch (error) {
-        console.error('Navigation error:', error);
+        console.error('[Splash] Navigation error:', error);
         // Fallback navigation
+        hasNavigatedRef.current = true;
         router.replace('/welcome');
       }
     }, 1000);
 
     return () => clearTimeout(timer);
-  }, [imageLoaded, isHydrated, goal, roadmap, isPremium]);
+  }, [imageLoaded, isHydrated, userHydrated, isPremium, isOnValidRoute]);
 
   // Show loading state until hydrated or if ambition data is not available
   if (!isHydrated || !ambitionData) {

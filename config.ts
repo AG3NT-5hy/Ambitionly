@@ -14,7 +14,10 @@ const rawApiUrl =
   ensureString(env.EXPO_PUBLIC_API_URL) ??
   ensureString(env.EXPO_PUBLIC_RORK_API_BASE_URL);
 
-const sanitizedBase = (rawApiUrl ?? `http://localhost:${port}`).replace(/\/+$/, '');
+// Default to hosted API so production builds work even without env vars
+const defaultApiUrl = 'https://ambitionly.onrender.com';
+
+const sanitizedBase = (rawApiUrl ?? defaultApiUrl).replace(/\/+$/, '');
 
 export const config = {
   API_URL: sanitizedBase,

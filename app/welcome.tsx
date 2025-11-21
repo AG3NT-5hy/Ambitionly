@@ -44,16 +44,16 @@ export default function WelcomeScreen() {
   const dynamicStyles = StyleSheet.create({
     signInButton: {
       position: 'absolute',
-      top: Platform.select({
-        ios: insets.top + 10,
+      bottom: Platform.select({
+        ios: insets.bottom + 10,
         android: 20,
         default: 20,
       }),
       right: 20,
       zIndex: 1000,
-      paddingHorizontal: 16,
-      paddingVertical: 8,
-      borderRadius: 20,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 16,
       backgroundColor: 'rgba(139, 92, 246, 0.15)',
       borderWidth: 1,
       borderColor: 'rgba(139, 92, 246, 0.3)',
@@ -419,7 +419,7 @@ export default function WelcomeScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Subtle Sign In button in top right */}
+      {/* Subtle Sign In button in bottom right */}
       <TouchableOpacity
         style={dynamicStyles.signInButton}
         onPress={handleSignIn}
@@ -896,7 +896,7 @@ const createStyles = (screenWidth: number, screenHeight: number) => StyleSheet.c
   },
   signInButtonText: {
     color: '#B0A8FF',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '500',
     letterSpacing: 0.5,
   },

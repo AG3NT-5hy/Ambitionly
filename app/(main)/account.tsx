@@ -292,7 +292,7 @@ export default function AccountScreen() {
               <View style={styles.section}>
                 <TouchableOpacity
                   style={styles.signUpButton}
-                  onPress={() => router.push('/login')}
+                  onPress={() => router.push('/auth?mode=signin&from=account')}
                 >
                   <Text style={styles.signUpButtonText}>Sign Up to Save Your Profile</Text>
                 </TouchableOpacity>
