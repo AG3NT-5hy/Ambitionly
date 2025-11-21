@@ -960,8 +960,8 @@ Output ONLY valid JSON in this exact format:
     console.log(`[Timer] Current active timers:`, taskTimers.filter(t => t.isActive).map(t => t.taskId));
     
     // Check if this task already has an active timer
-    const existingTimer = taskTimers.find(timer => timer.taskId === taskId && timer.isActive);
-    if (existingTimer) {
+    const activeTimer = taskTimers.find(timer => timer.taskId === taskId && timer.isActive);
+    if (activeTimer) {
       console.log(`[Timer] Task ${taskId} already has an active timer, not starting a new one`);
       return;
     }
@@ -988,10 +988,11 @@ Output ONLY valid JSON in this exact format:
 
     // Cancel any existing notifications for this task before scheduling a new one
     // This prevents duplicate notifications if the timer is restarted
-    const existingTimer = taskTimers.find(t => t.taskId === taskId);
-    if (existingTimer?.notificationId) {
+    // Check for any timer (active or inactive) to cancel its notification
+    const existingTimerForNotification = taskTimers.find(t => t.taskId === taskId);
+    if (existingTimerForNotification?.notificationId) {
       try {
-        await NotificationService.cancelNotification(existingTimer.notificationId);
+        await NotificationService.cancelNotification(existingTimerForNotification.notificationId);
         console.log(`[Timer] Cancelled existing notification for task ${taskId} before scheduling new one`);
       } catch (error) {
         console.warn(`[Timer] Failed to cancel existing notification:`, error);
