@@ -6,7 +6,7 @@ const grantPremiumSchema = z.object({
   email: z.string().email('Invalid email address'),
   plan: z.enum(['monthly', 'annual', 'lifetime'], {
     errorMap: () => ({ message: 'Plan must be monthly, annual, or lifetime' }),
-  }),
+  } as any), // Type assertion for Zod version compatibility
 });
 
 export const grantPremiumProcedure = publicProcedure

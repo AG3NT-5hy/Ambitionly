@@ -1047,9 +1047,9 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       
       await updateUserMutation.mutateAsync({
         email: userData.email!,
-        name: userData.name,
-        username: userData.username,
-        profilePicture: userData.profilePicture,
+        name: userData.name || undefined,
+        username: userData.username || undefined,
+        profilePicture: userData.profilePicture || undefined,
         subscriptionPlan: userData.subscriptionPlan,
         subscriptionStatus: userData.subscriptionStatus,
         subscriptionExpiresAt: userData.subscriptionExpiresAt?.toISOString(),

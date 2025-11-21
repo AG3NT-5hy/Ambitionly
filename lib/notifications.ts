@@ -181,11 +181,11 @@ export class NotificationService {
       // Use proper timeInterval trigger format with explicit type
       // This ensures the notification fires after the specified seconds, not immediately
       // Using 'timeInterval' type explicitly prevents the notification from firing immediately
-      const notificationTrigger: Notifications.TimeIntervalTriggerInput = {
+      const notificationTrigger = {
         type: 'timeInterval' as const,
         seconds: safeTriggerSeconds,
         repeats: false,
-      };
+      } as Notifications.TimeIntervalTriggerInput;
       
       // Schedule the notification
       try {

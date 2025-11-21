@@ -27,8 +27,9 @@ export default function SplashScreen() {
                     (!user.subscriptionExpiresAt || user.subscriptionExpiresAt > new Date());
   
   // Track if we're already on a valid route (not the splash screen)
-  // segments will be empty array [''] for index route, or ['(main)', 'roadmap'] etc for other routes
-  const isOnValidRoute = segments.length > 0 && segments[0] !== '' && segments[0] !== 'index';
+  // segments will be empty array for index route, or ['(main)', 'roadmap'] etc for other routes
+  // Check if we're on a route other than the index/splash screen
+  const isOnValidRoute = segments.length > 0 && segments[0] && typeof segments[0] === 'string' && segments[0] !== '';
 
   const { width } = useWindowDimensions();
   const animatedValue = useRef(new Animated.Value(0)).current;
