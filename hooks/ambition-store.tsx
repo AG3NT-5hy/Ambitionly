@@ -98,10 +98,16 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
       if (storedUser) {
         try {
           const userData = JSON.parse(storedUser);
+          // Handle all premium plans: monthly, annual, lifetime
+          // Lifetime plans don't have expiration dates, so handle them specially
+          // Monthly and annual plans need valid expiration dates
+          const isLifetime = userData.subscriptionPlan === 'lifetime';
+          const isMonthlyOrAnnual = userData.subscriptionPlan === 'monthly' || userData.subscriptionPlan === 'annual';
+          const hasValidExpiration = !userData.subscriptionExpiresAt || new Date(userData.subscriptionExpiresAt) > new Date();
           const hasPremium = userData.subscriptionPlan && 
                             userData.subscriptionPlan !== 'free' &&
                             userData.subscriptionStatus === 'active' &&
-                            (!userData.subscriptionExpiresAt || new Date(userData.subscriptionExpiresAt) > new Date());
+                            (isLifetime || (isMonthlyOrAnnual && hasValidExpiration));
           
           return {
             email: session.user.email,

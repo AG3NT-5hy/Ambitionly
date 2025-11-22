@@ -258,10 +258,10 @@ export default function SettingsScreen() {
                             onPress: async () => {
                               try {
                                 await unifiedSignOut();
-                                // Small delay to ensure all state is cleared
-                                await new Promise(resolve => setTimeout(resolve, 100));
+                                // Additional delay to ensure all state is cleared and navigation refs are reset
+                                await new Promise(resolve => setTimeout(resolve, 500));
                                 showToast('Signed out successfully', 'success');
-                                // Use replace to prevent going back
+                                // Use replace to prevent going back, and reset navigation state
                                 router.replace('/welcome');
                               } catch (error) {
                                 console.error('Sign out error:', error);

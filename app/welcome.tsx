@@ -45,11 +45,11 @@ export default function WelcomeScreen() {
     signInButton: {
       position: 'absolute',
       bottom: Platform.select({
-        ios: insets.bottom + 10,
-        android: 20,
-        default: 20,
+        ios: insets.bottom + 50,
+        android: 60,
+        default: 60,
       }),
-      right: 20,
+      left: 20,
       zIndex: 1000,
       paddingHorizontal: 12,
       paddingVertical: 6,
@@ -419,7 +419,7 @@ export default function WelcomeScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Subtle Sign In button in bottom right */}
+      {/* Subtle Sign In button in bottom left */}
       <TouchableOpacity
         style={dynamicStyles.signInButton}
         onPress={handleSignIn}

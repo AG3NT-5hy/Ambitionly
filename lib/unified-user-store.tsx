@@ -236,40 +236,64 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
           guestData = await collectGuestData();
         }
 
-        if (!createdUser) {
-          // Restore server data (this will also trigger ambition store reload)
-          await restoreServerDataToLocal(dbUser);
-        }
-
-        const userData: UnifiedUser = createdUser && guestData ? {
+        // Use database subscription data (it's the source of truth)
+        // Only use guest data for subscription if database doesn't have it and we just created the user
+        const userData: UnifiedUser = {
           id: dbUser.id || authUser.id,
           email: dbUser.email || email,
           name: dbUser.name || authUser.user_metadata?.name || null,
           username: dbUser.username || null,
-          profilePicture: guestData.profilePicture || dbUser.profilePicture || authUser.user_metadata?.picture || null,
+          profilePicture: createdUser && guestData 
+            ? (guestData.profilePicture || dbUser.profilePicture || authUser.user_metadata?.picture || null)
+            : (dbUser.profilePicture || authUser.user_metadata?.picture || null),
           mode: 'registered',
           isGuest: false,
           createdAt: dbUser.createdAt ? new Date(dbUser.createdAt) : new Date(),
-          subscriptionPlan: guestData.subscriptionPlan as any,
-          subscriptionStatus: guestData.subscriptionStatus as any,
-          subscriptionExpiresAt: guestData.subscriptionExpiresAt,
-          subscriptionPurchasedAt: guestData.subscriptionPurchasedAt,
-        } : {
-          id: dbUser.id || authUser.id,
-          email: dbUser.email || email,
-          name: dbUser.name || authUser.user_metadata?.name || null,
-          username: dbUser.username || null,
-          profilePicture: dbUser.profilePicture || authUser.user_metadata?.picture || null,
-          mode: 'registered',
-          isGuest: false,
-          createdAt: dbUser.createdAt ? new Date(dbUser.createdAt) : new Date(),
-          subscriptionPlan: (dbUser.subscriptionPlan || 'free') as any,
-          subscriptionStatus: dbUser.subscriptionStatus as any,
-          subscriptionExpiresAt: dbUser.subscriptionExpiresAt ? new Date(dbUser.subscriptionExpiresAt) : null,
-          subscriptionPurchasedAt: dbUser.subscriptionPurchasedAt ? new Date(dbUser.subscriptionPurchasedAt) : null,
+          // Always prefer database subscription data over guest data
+          subscriptionPlan: (dbUser.subscriptionPlan || (createdUser && guestData ? guestData.subscriptionPlan : 'free')) as any,
+          subscriptionStatus: (dbUser.subscriptionStatus || (createdUser && guestData ? guestData.subscriptionStatus : null)) as any,
+          subscriptionExpiresAt: dbUser.subscriptionExpiresAt 
+            ? new Date(dbUser.subscriptionExpiresAt) 
+            : (createdUser && guestData ? guestData.subscriptionExpiresAt : null),
+          subscriptionPurchasedAt: dbUser.subscriptionPurchasedAt 
+            ? new Date(dbUser.subscriptionPurchasedAt) 
+            : (createdUser && guestData ? guestData.subscriptionPurchasedAt : null),
         };
 
+        // Save user data FIRST (so restore function can check premium status)
         await saveUser(userData);
+        console.log('[UnifiedUser] User data saved with subscription (Google):', {
+          plan: userData.subscriptionPlan,
+          status: userData.subscriptionStatus,
+          expiresAt: userData.subscriptionExpiresAt,
+          isLifetime: userData.subscriptionPlan === 'lifetime',
+        });
+
+        // Then restore server data if user exists in database (only for premium users)
+        // This ensures roadmap and other data is restored
+        await restoreServerDataToLocal(dbUser);
+        
+        // Trigger initial sync for premium users to ensure any local changes are synced to database
+        const isLifetime = userData.subscriptionPlan === 'lifetime';
+        const isMonthlyOrAnnual = userData.subscriptionPlan === 'monthly' || userData.subscriptionPlan === 'annual';
+        const hasValidExpiration = !userData.subscriptionExpiresAt || userData.subscriptionExpiresAt > new Date();
+        const isPremium = userData.subscriptionPlan && 
+                         userData.subscriptionPlan !== 'free' &&
+                         userData.subscriptionStatus === 'active' &&
+                         (isLifetime || (isMonthlyOrAnnual && hasValidExpiration));
+        
+        if (isPremium) {
+          console.log('[UnifiedUser] Premium user detected (Google), triggering initial data sync...');
+          setTimeout(() => {
+            try {
+              const { DeviceEventEmitter } = require('react-native');
+              DeviceEventEmitter.emit('ambition-sync-trigger');
+              console.log('[UnifiedUser] ✅ Emitted sync event for premium user (Google)');
+            } catch (e) {
+              console.warn('[UnifiedUser] Could not emit sync event:', e);
+            }
+          }, 1000);
+        }
       } else {
         guestData = guestData || await collectGuestData();
         const fallbackUser: UnifiedUser = {
@@ -370,50 +394,161 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       } catch (e) {
         console.warn('[UnifiedUser] Could not emit storage reload event:', e);
       }
-    }, 300);
+    }, 500); // Increased delay to ensure AsyncStorage writes are complete
   };
 
-  // Restore server data to local storage (only for premium users)
+  // Restore server data to local storage (for all users - premium status only affects cloud sync)
   const restoreServerDataToLocal = async (dbUser: any) => {
     try {
       // Check if user has premium subscription
+      // Premium plans: 'monthly', 'annual', 'lifetime'
+      // Lifetime plans don't have expiration dates, so handle them specially
+      // Monthly and annual plans need valid expiration dates
+      const isLifetime = dbUser.subscriptionPlan === 'lifetime';
+      const isMonthlyOrAnnual = dbUser.subscriptionPlan === 'monthly' || dbUser.subscriptionPlan === 'annual';
+      const hasValidExpiration = !dbUser.subscriptionExpiresAt || new Date(dbUser.subscriptionExpiresAt) > new Date();
       const hasPremium = dbUser.subscriptionPlan && 
                         dbUser.subscriptionPlan !== 'free' &&
                         dbUser.subscriptionStatus === 'active' &&
-                        (!dbUser.subscriptionExpiresAt || new Date(dbUser.subscriptionExpiresAt) > new Date());
+                        (isLifetime || (isMonthlyOrAnnual && hasValidExpiration));
       
+      // Only restore data for premium users
       if (!hasPremium) {
-        console.log('[UnifiedUser] User does not have premium subscription, skipping cloud data restoration');
+        console.log('[UnifiedUser] User does not have premium subscription, skipping cloud data restoration', {
+          plan: dbUser.subscriptionPlan,
+          status: dbUser.subscriptionStatus,
+          expiresAt: dbUser.subscriptionExpiresAt,
+          isLifetime,
+        });
         return;
       }
       
-      console.log('[UnifiedUser] Restoring server data to local storage (premium user)...');
+      console.log('[UnifiedUser] Restoring server data to local storage (premium user)...', {
+        hasPremium,
+        plan: dbUser.subscriptionPlan,
+        status: dbUser.subscriptionStatus,
+        isLifetime,
+        hasGoal: !!dbUser.goal,
+        hasRoadmap: !!dbUser.roadmap,
+      });
+      
+      // Check for active task timers locally before restoring
+      const localTaskTimersStr = await AsyncStorage.getItem(STORAGE_KEYS.TASK_TIMERS);
+      let localTaskTimers: any[] = [];
+      let hasActiveLocalTimer = false;
+      
+      if (localTaskTimersStr) {
+        try {
+          localTaskTimers = JSON.parse(localTaskTimersStr);
+          // Check if any timer is currently active (has startTime and no endTime, or is within duration)
+          hasActiveLocalTimer = localTaskTimers.some((timer: any) => {
+            if (!timer.startTime) return false;
+            const startTime = new Date(timer.startTime).getTime();
+            const now = Date.now();
+            const elapsed = (now - startTime) / 1000; // seconds
+            const duration = timer.duration || 0; // seconds
+            return elapsed < duration && !timer.endTime;
+          });
+          console.log('[UnifiedUser] Local task timers check:', {
+            count: localTaskTimers.length,
+            hasActive: hasActiveLocalTimer,
+          });
+        } catch (e) {
+          console.warn('[UnifiedUser] Failed to parse local task timers:', e);
+        }
+      }
       
       const restorePromises: Promise<void>[] = [];
       
-      // Restore goal and roadmap data
+      // Check local data to preserve it if server doesn't have it
+      const [localGoal, localRoadmap, localTimeline, localTimeCommitment, localAnswers, localCompletedTasks, localStreakData] = await Promise.all([
+        AsyncStorage.getItem(STORAGE_KEYS.GOAL),
+        AsyncStorage.getItem(STORAGE_KEYS.ROADMAP),
+        AsyncStorage.getItem(STORAGE_KEYS.TIMELINE),
+        AsyncStorage.getItem(STORAGE_KEYS.TIME_COMMITMENT),
+        AsyncStorage.getItem(STORAGE_KEYS.ANSWERS),
+        AsyncStorage.getItem(STORAGE_KEYS.COMPLETED_TASKS),
+        AsyncStorage.getItem(STORAGE_KEYS.STREAK_DATA),
+      ]);
+      
+      // Restore goal and roadmap data (use server data if available, otherwise preserve local)
       if (dbUser.goal) {
         restorePromises.push(AsyncStorage.setItem(STORAGE_KEYS.GOAL, dbUser.goal));
+      } else if (localGoal) {
+        // Preserve local goal if server doesn't have it
+        console.log('[UnifiedUser] Preserving local goal (server has none)');
       }
       if (dbUser.timeline) {
         restorePromises.push(AsyncStorage.setItem(STORAGE_KEYS.TIMELINE, dbUser.timeline));
+      } else if (localTimeline) {
+        console.log('[UnifiedUser] Preserving local timeline (server has none)');
       }
       if (dbUser.timeCommitment) {
         restorePromises.push(AsyncStorage.setItem(STORAGE_KEYS.TIME_COMMITMENT, dbUser.timeCommitment));
+      } else if (localTimeCommitment) {
+        console.log('[UnifiedUser] Preserving local time commitment (server has none)');
       }
       if (dbUser.answers) {
         restorePromises.push(AsyncStorage.setItem(STORAGE_KEYS.ANSWERS, dbUser.answers));
+      } else if (localAnswers) {
+        console.log('[UnifiedUser] Preserving local answers (server has none)');
       }
       if (dbUser.roadmap) {
         restorePromises.push(AsyncStorage.setItem(STORAGE_KEYS.ROADMAP, dbUser.roadmap));
+      } else if (localRoadmap) {
+        // Preserve local roadmap if server doesn't have it
+        console.log('[UnifiedUser] Preserving local roadmap (server has none)');
       }
       if (dbUser.completedTasks) {
         restorePromises.push(AsyncStorage.setItem(STORAGE_KEYS.COMPLETED_TASKS, dbUser.completedTasks));
+      } else if (localCompletedTasks) {
+        console.log('[UnifiedUser] Preserving local completed tasks (server has none)');
       }
       if (dbUser.streakData) {
         restorePromises.push(AsyncStorage.setItem(STORAGE_KEYS.STREAK_DATA, dbUser.streakData));
+      } else if (localStreakData) {
+        console.log('[UnifiedUser] Preserving local streak data (server has none)');
       }
-      if (dbUser.taskTimers) {
+      
+      // Handle task timers intelligently: preserve active local timers
+      if (hasActiveLocalTimer && localTaskTimers.length > 0) {
+        // Merge local active timers with server timers
+        let serverTaskTimers: any[] = [];
+        if (dbUser.taskTimers) {
+          try {
+            serverTaskTimers = JSON.parse(dbUser.taskTimers);
+          } catch (e) {
+            console.warn('[UnifiedUser] Failed to parse server task timers:', e);
+          }
+        }
+        
+        // Keep active local timers, merge with server timers (avoid duplicates)
+        const activeLocalTimers = localTaskTimers.filter((timer: any) => {
+          if (!timer.startTime) return false;
+          const startTime = new Date(timer.startTime).getTime();
+          const now = Date.now();
+          const elapsed = (now - startTime) / 1000;
+          const duration = timer.duration || 0;
+          return elapsed < duration && !timer.endTime;
+        });
+        
+        // Merge: active local timers + server timers (excluding duplicates by taskId)
+        const mergedTimers = [...activeLocalTimers];
+        serverTaskTimers.forEach((serverTimer: any) => {
+          const exists = mergedTimers.some((t: any) => t.taskId === serverTimer.taskId);
+          if (!exists) {
+            mergedTimers.push(serverTimer);
+          }
+        });
+        
+        restorePromises.push(AsyncStorage.setItem(STORAGE_KEYS.TASK_TIMERS, JSON.stringify(mergedTimers)));
+        console.log('[UnifiedUser] Preserved active local timers and merged with server timers:', {
+          activeLocal: activeLocalTimers.length,
+          server: serverTaskTimers.length,
+          merged: mergedTimers.length,
+        });
+      } else if (dbUser.taskTimers) {
+        // No active local timers, use server data
         restorePromises.push(AsyncStorage.setItem(STORAGE_KEYS.TASK_TIMERS, dbUser.taskTimers));
       }
       
@@ -425,6 +560,7 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         hasCompletedTasks: !!dbUser.completedTasks,
         goalLength: dbUser.goal?.length || 0,
         roadmapLength: dbUser.roadmap?.length || 0,
+        preservedActiveTimers: hasActiveLocalTimer,
       });
       
       // Trigger ambition store reload to load the restored data
@@ -800,21 +936,8 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         throw new Error('User data not found in database');
       }
       
-      // 4. Restore server data to local storage (this will also trigger ambition store reload)
-      console.log('[UnifiedUser] About to restore server data, dbUser:', {
-        id: dbUser.id,
-        email: dbUser.email,
-        hasGoal: !!dbUser.goal,
-        hasRoadmap: !!dbUser.roadmap,
-        hasCompletedTasks: !!dbUser.completedTasks,
-        subscriptionPlan: dbUser.subscriptionPlan,
-        subscriptionStatus: dbUser.subscriptionStatus,
-        goalLength: dbUser.goal?.length || 0,
-        roadmapLength: dbUser.roadmap?.length || 0,
-      });
-      await restoreServerDataToLocal(dbUser);
-      
-      // 5. Create user object
+      // 4. Create user object with subscription data FIRST (before restoring data)
+      // This ensures subscription status is available for the restore function
       const userData: UnifiedUser = {
         id: dbUser.id || authData.user.id,
         email: dbUser.email || authData.user.email || null,
@@ -830,8 +953,53 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         subscriptionPurchasedAt: dbUser.subscriptionPurchasedAt ? new Date(dbUser.subscriptionPurchasedAt) : null,
       };
       
-      // 6. Save to local storage
+      // 5. Save user data to local storage FIRST (so restore function can check premium status)
       await saveUser(userData);
+      console.log('[UnifiedUser] User data saved with subscription:', {
+        plan: userData.subscriptionPlan,
+        status: userData.subscriptionStatus,
+        expiresAt: userData.subscriptionExpiresAt,
+        isLifetime: userData.subscriptionPlan === 'lifetime',
+      });
+      
+      // 6. Restore server data to local storage (this will also trigger ambition store reload)
+      // This must happen AFTER user data is saved so premium check works
+      console.log('[UnifiedUser] About to restore server data, dbUser:', {
+        id: dbUser.id,
+        email: dbUser.email,
+        hasGoal: !!dbUser.goal,
+        hasRoadmap: !!dbUser.roadmap,
+        hasCompletedTasks: !!dbUser.completedTasks,
+        subscriptionPlan: dbUser.subscriptionPlan,
+        subscriptionStatus: dbUser.subscriptionStatus,
+        goalLength: dbUser.goal?.length || 0,
+        roadmapLength: dbUser.roadmap?.length || 0,
+      });
+      await restoreServerDataToLocal(dbUser);
+      
+      // 7. Trigger initial sync for premium users to ensure any local changes are synced to database
+      // This ensures data consistency after sign-in
+      const isLifetime = userData.subscriptionPlan === 'lifetime';
+      const isMonthlyOrAnnual = userData.subscriptionPlan === 'monthly' || userData.subscriptionPlan === 'annual';
+      const hasValidExpiration = !userData.subscriptionExpiresAt || userData.subscriptionExpiresAt > new Date();
+      const isPremium = userData.subscriptionPlan && 
+                       userData.subscriptionPlan !== 'free' &&
+                       userData.subscriptionStatus === 'active' &&
+                       (isLifetime || (isMonthlyOrAnnual && hasValidExpiration));
+      
+      if (isPremium) {
+        console.log('[UnifiedUser] Premium user detected, triggering initial data sync...');
+        // Wait a bit for ambition store to reload, then trigger sync
+        setTimeout(() => {
+          try {
+            const { DeviceEventEmitter } = require('react-native');
+            DeviceEventEmitter.emit('ambition-sync-trigger');
+            console.log('[UnifiedUser] ✅ Emitted sync event for premium user');
+          } catch (e) {
+            console.warn('[UnifiedUser] Could not emit sync event:', e);
+          }
+        }, 1000);
+      }
       
       console.log('[UnifiedUser] ✅ Sign in complete, server data restored to local storage');
       
@@ -875,8 +1043,23 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
     try {
       console.log('[UnifiedUser] Signing out...');
       
-      // 1. Sign out from Supabase
-      await supabase.auth.signOut();
+      // 1. Sign out from Supabase and wait for it to complete
+      const { error: signOutError } = await supabase.auth.signOut();
+      if (signOutError) {
+        console.warn('[UnifiedUser] Supabase sign out error:', signOutError);
+      }
+      
+      // Wait a moment to ensure Supabase session is fully cleared
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      // Verify session is cleared
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        console.warn('[UnifiedUser] Session still exists after sign out, forcing clear');
+        // Force clear by signing out again
+        await supabase.auth.signOut();
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
       
       // 2. Logout from RevenueCat
       try {
@@ -938,6 +1121,13 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       const { DeviceEventEmitter } = require('react-native');
       DeviceEventEmitter.emit('ambition-clear-all');
       console.log('[UnifiedUser] Emitted ambition-clear-all event');
+      
+      // 7. Emit sign-out event to reset navigation state in splash screen
+      DeviceEventEmitter.emit('user-signed-out');
+      console.log('[UnifiedUser] Emitted user-signed-out event');
+      
+      // 8. Wait a bit more to ensure all state is cleared before navigation
+      await new Promise(resolve => setTimeout(resolve, 300));
       
       console.log('[UnifiedUser] ✅ Signed out, fresh guest session created');
     } catch (error) {

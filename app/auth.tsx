@@ -4,12 +4,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X, Mail, Lock, Eye, EyeOff } from 'lucide-react-native';
-import { useAuth } from '../hooks/auth-store';
+import { useUnifiedUser } from '../lib/unified-user-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS } from '../constants';
 
 export default function AuthScreen() {
-  const { signup, login, signInWithGoogle, dismissAuthFlow } = useAuth();
+  const { signIn, signUp, signInWithGoogle } = useUnifiedUser();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
   // Start in login mode if 'mode=signin' query param is present, or if coming from welcome screen
@@ -68,15 +68,20 @@ export default function AuthScreen() {
 
     setIsLoading(true);
     try {
-      const success = isLogin 
-        ? await login(email.trim(), password)
-        : await signup(email.trim(), password);
+      let result;
+      if (isLogin) {
+        // Use unified user store signIn which restores data from database
+        result = await signIn(email.trim(), password);
+      } else {
+        // Use unified user store signUp
+        result = await signUp(email.trim(), password, email.trim().split('@')[0] || 'User');
+      }
 
-      if (success) {
+      if (result?.success) {
         // Wait longer for data to be restored from server and ambition store to reload
         // restoreServerDataToLocal writes to AsyncStorage, then triggers reload with 300ms delay
         // We need to wait for both the write and the reload to complete
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        await new Promise(resolve => setTimeout(resolve, 2000));
         
         // Check if user has roadmap and premium status
         // Try multiple times with retries in case data is still loading
@@ -84,7 +89,7 @@ export default function AuthScreen() {
         let storedRoadmap: string | null = null;
         let hasRoadmap = false;
         
-        for (let attempt = 0; attempt < 3; attempt++) {
+        for (let attempt = 0; attempt < 5; attempt++) {
           storedGoal = await AsyncStorage.getItem(STORAGE_KEYS.GOAL);
           storedRoadmap = await AsyncStorage.getItem(STORAGE_KEYS.ROADMAP);
           hasRoadmap = !!(storedGoal && storedRoadmap);
@@ -94,7 +99,7 @@ export default function AuthScreen() {
             break;
           }
           
-          if (attempt < 2) {
+          if (attempt < 4) {
             console.log(`[Auth] Roadmap not found on attempt ${attempt + 1}, waiting and retrying...`);
             await new Promise(resolve => setTimeout(resolve, 500));
           }
@@ -107,20 +112,23 @@ export default function AuthScreen() {
           roadmapLength: storedRoadmap?.length || 0,
         });
         
-        // Check if user is premium
+        // Check if user is premium (handle lifetime plans)
         const storedUser = await AsyncStorage.getItem(STORAGE_KEYS.USER);
         let isPremium = false;
         if (storedUser) {
           try {
             const userData = JSON.parse(storedUser);
+            const isLifetime = userData.subscriptionPlan === 'lifetime';
+            const hasValidExpiration = !userData.subscriptionExpiresAt || new Date(userData.subscriptionExpiresAt) > new Date();
             isPremium = userData.subscriptionPlan && 
                        userData.subscriptionPlan !== 'free' &&
                        userData.subscriptionStatus === 'active' &&
-                       (!userData.subscriptionExpiresAt || new Date(userData.subscriptionExpiresAt) > new Date());
+                       (isLifetime || hasValidExpiration);
             console.log('[Auth] Premium check:', {
               plan: userData.subscriptionPlan,
               status: userData.subscriptionStatus,
               expiresAt: userData.subscriptionExpiresAt,
+              isLifetime,
               isPremium,
             });
           } catch (e) {
@@ -128,13 +136,13 @@ export default function AuthScreen() {
           }
         }
         
-        if (hasRoadmap && isPremium) {
-          // User has roadmap and is premium - go to roadmap
-          console.log('[Auth] Navigating to roadmap (has roadmap and premium)');
+        if (hasRoadmap) {
+          // User has roadmap - go to roadmap (premium not required to view local roadmap)
+          console.log('[Auth] Navigating to roadmap (has roadmap)');
           router.replace('/(main)/roadmap');
         } else {
           // User doesn't have roadmap - go to welcome with message
-          console.log('[Auth] Navigating to welcome:', { hasRoadmap, isPremium });
+          console.log('[Auth] Navigating to welcome (no roadmap)');
           router.replace('/welcome?noRoadmap=true');
         }
       } else {
@@ -169,7 +177,7 @@ export default function AuthScreen() {
         // Wait longer for data to be restored from server and ambition store to reload
         // restoreServerDataToLocal writes to AsyncStorage, then triggers reload with 300ms delay
         // We need to wait for both the write and the reload to complete
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        await new Promise(resolve => setTimeout(resolve, 2000));
         
         // Check if user has roadmap and premium status
         // Try multiple times with retries in case data is still loading
@@ -177,18 +185,18 @@ export default function AuthScreen() {
         let storedRoadmap: string | null = null;
         let hasRoadmap = false;
         
-        for (let attempt = 0; attempt < 3; attempt++) {
+        for (let attempt = 0; attempt < 5; attempt++) {
           storedGoal = await AsyncStorage.getItem(STORAGE_KEYS.GOAL);
           storedRoadmap = await AsyncStorage.getItem(STORAGE_KEYS.ROADMAP);
           hasRoadmap = !!(storedGoal && storedRoadmap);
           
           if (hasRoadmap) {
-            console.log(`[Auth] Roadmap found on attempt ${attempt + 1}`);
+            console.log(`[Auth] Roadmap found on attempt ${attempt + 1} (Google)`);
             break;
           }
           
-          if (attempt < 2) {
-            console.log(`[Auth] Roadmap not found on attempt ${attempt + 1}, waiting and retrying...`);
+          if (attempt < 4) {
+            console.log(`[Auth] Roadmap not found on attempt ${attempt + 1}, waiting and retrying... (Google)`);
             await new Promise(resolve => setTimeout(resolve, 500));
           }
         }
@@ -200,20 +208,23 @@ export default function AuthScreen() {
           roadmapLength: storedRoadmap?.length || 0,
         });
         
-        // Check if user is premium
+        // Check if user is premium (handle lifetime plans)
         const storedUser = await AsyncStorage.getItem(STORAGE_KEYS.USER);
         let isPremium = false;
         if (storedUser) {
           try {
             const userData = JSON.parse(storedUser);
+            const isLifetime = userData.subscriptionPlan === 'lifetime';
+            const hasValidExpiration = !userData.subscriptionExpiresAt || new Date(userData.subscriptionExpiresAt) > new Date();
             isPremium = userData.subscriptionPlan && 
                        userData.subscriptionPlan !== 'free' &&
                        userData.subscriptionStatus === 'active' &&
-                       (!userData.subscriptionExpiresAt || new Date(userData.subscriptionExpiresAt) > new Date());
+                       (isLifetime || hasValidExpiration);
             console.log('[Auth] Premium check (Google):', {
               plan: userData.subscriptionPlan,
               status: userData.subscriptionStatus,
               expiresAt: userData.subscriptionExpiresAt,
+              isLifetime,
               isPremium,
             });
           } catch (e) {
@@ -221,25 +232,27 @@ export default function AuthScreen() {
           }
         }
         
-        if (hasRoadmap && isPremium) {
-          // User has roadmap and is premium - go to roadmap
-          console.log('[Auth] Navigating to roadmap (Google - has roadmap and premium)');
+        if (hasRoadmap) {
+          // User has roadmap - go to roadmap (premium not required to view local roadmap)
+          console.log('[Auth] Navigating to roadmap (Google - has roadmap)');
           router.replace('/(main)/roadmap');
         } else {
           // User doesn't have roadmap - go to welcome with message
-          console.log('[Auth] Navigating to welcome (Google):', { hasRoadmap, isPremium });
+          console.log('[Auth] Navigating to welcome (Google - no roadmap)');
           router.replace('/welcome?noRoadmap=true');
         }
+      } else {
+        setError('Failed to sign in with Google. Please try again.');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to sign in with Google');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to sign in with Google. Please try again.';
+      setError(errorMessage);
     } finally {
       setIsLoadingGoogle(false);
     }
   };
 
   const handleClose = () => {
-    dismissAuthFlow();
     router.back();
   };
 

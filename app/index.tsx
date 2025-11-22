@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, StyleSheet, Image, useWindowDimensions, Animated, AppState, AppStateStatus } from 'react-native';
+import { View, StyleSheet, Image, useWindowDimensions, Animated, AppState, AppStateStatus, DeviceEventEmitter } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useSegments } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -71,6 +71,20 @@ export default function SplashScreen() {
     };
   }, [animatedValue, fadeValue]);
 
+  // Listen for sign-out events to reset navigation state
+  useEffect(() => {
+    const resetNavigation = () => {
+      console.log('[Splash] Sign-out detected, resetting navigation state');
+      hasNavigatedRef.current = false;
+    };
+
+    const subscription = DeviceEventEmitter.addListener('user-signed-out', resetNavigation);
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
   // Handle app state changes - prevent navigation when app returns from background if already on valid route
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
@@ -112,6 +126,18 @@ export default function SplashScreen() {
         const storedGoal = await AsyncStorage.getItem(STORAGE_KEYS.GOAL);
         const storedRoadmap = await AsyncStorage.getItem(STORAGE_KEYS.ROADMAP);
         
+        // Also check if user is a guest (after sign-out, user should be guest)
+        const storedUser = await AsyncStorage.getItem(STORAGE_KEYS.USER);
+        let isGuestUser = true;
+        if (storedUser) {
+          try {
+            const userData = JSON.parse(storedUser);
+            isGuestUser = userData.isGuest === true;
+          } catch (e) {
+            // If we can't parse, assume guest
+          }
+        }
+        
         // Parse roadmap if it exists
         let parsedRoadmap = null;
         if (storedRoadmap) {
@@ -123,17 +149,19 @@ export default function SplashScreen() {
         }
         
         // Only navigate to roadmap if we have both goal and roadmap in storage
-        if (storedGoal && parsedRoadmap && typeof storedGoal === 'string' && typeof parsedRoadmap === 'object' && parsedRoadmap.phases) {
+        // AND user is not a guest (guests shouldn't have roadmaps, but check anyway)
+        if (storedGoal && parsedRoadmap && typeof storedGoal === 'string' && typeof parsedRoadmap === 'object' && parsedRoadmap.phases && !isGuestUser) {
           console.log('[Splash] Existing goal found in storage, navigating to roadmap');
           hasNavigatedRef.current = true;
           router.replace('/(main)/roadmap');
         } else {
           // If premium user has no roadmap, show welcome screen but keep them logged in
           // They can start a new onboarding without being logged out
-          if (isPremium) {
+          // For guests or users without roadmaps, always go to welcome
+          if (isPremium && !isGuestUser) {
             console.log('[Splash] Premium user with no roadmap, navigating to welcome (staying logged in)');
           } else {
-            console.log('[Splash] No existing goal in storage, navigating to welcome');
+            console.log('[Splash] No existing goal in storage or guest user, navigating to welcome');
           }
           hasNavigatedRef.current = true;
           router.replace('/welcome');

@@ -34,14 +34,14 @@ export function useAuthListener() {
         switch (event) {
           case 'SIGNED_IN':
             console.log('✅ User signed in:', session?.user?.email);
-            // Navigate to main app after successful sign in
-            router.replace('/(main)/roadmap');
+            // Don't auto-navigate here - let the auth screen handle navigation
+            // This prevents conflicts with the sign-in flow
             break;
             
           case 'SIGNED_OUT':
             console.log('👋 User signed out');
-            // Navigate back to welcome/login
-            router.replace('/welcome');
+            // Don't auto-navigate here - let the sign-out handler manage navigation
+            // This prevents navigation loops and conflicts
             break;
             
           case 'TOKEN_REFRESHED':
