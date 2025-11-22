@@ -148,18 +148,34 @@ export default function SplashScreen() {
           }
         }
         
+        // Check if user is registered (not guest) by checking Supabase session
+        let isRegisteredUser = !isGuestUser;
+        if (isGuestUser) {
+          // Double-check by looking at Supabase session
+          try {
+            const { supabase } = await import('../lib/supabase');
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user) {
+              console.log('[Splash] Supabase session found, user is registered');
+              isRegisteredUser = true;
+            }
+          } catch (e) {
+            console.warn('[Splash] Error checking Supabase session:', e);
+          }
+        }
+        
         // Only navigate to roadmap if we have both goal and roadmap in storage
-        // AND user is not a guest (guests shouldn't have roadmaps, but check anyway)
-        if (storedGoal && parsedRoadmap && typeof storedGoal === 'string' && typeof parsedRoadmap === 'object' && parsedRoadmap.phases && !isGuestUser) {
+        // AND user is registered (not guest)
+        if (storedGoal && parsedRoadmap && typeof storedGoal === 'string' && typeof parsedRoadmap === 'object' && parsedRoadmap.phases && isRegisteredUser) {
           console.log('[Splash] Existing goal found in storage, navigating to roadmap');
           hasNavigatedRef.current = true;
           router.replace('/(main)/roadmap');
         } else {
-          // If premium user has no roadmap, show welcome screen but keep them logged in
+          // If registered user has no roadmap, show welcome screen but keep them logged in
           // They can start a new onboarding without being logged out
           // For guests or users without roadmaps, always go to welcome
-          if (isPremium && !isGuestUser) {
-            console.log('[Splash] Premium user with no roadmap, navigating to welcome (staying logged in)');
+          if (isRegisteredUser) {
+            console.log('[Splash] Registered user with no roadmap, navigating to welcome (staying logged in)');
           } else {
             console.log('[Splash] No existing goal in storage or guest user, navigating to welcome');
           }

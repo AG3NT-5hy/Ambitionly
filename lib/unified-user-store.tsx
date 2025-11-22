@@ -20,13 +20,19 @@ import { config } from '../config';
 
 const createBackendClient = () => {
   const baseUrl = config.API_URL;
+  const trpcUrl = `${baseUrl}/api/trpc`;
+  console.log('[UnifiedUser] Creating backend client with URL:', trpcUrl);
+  
   return createTRPCProxyClient<AppRouter>({
     transformer: superjson,
     links: [
       httpLink({
-        url: `${baseUrl}/api/trpc`,
+        url: trpcUrl,
         fetch: async (url, options) => {
           try {
+            console.log('[UnifiedUser] Making request to:', url);
+            const startTime = Date.now();
+            
             const response = await fetch(url, {
               ...options,
               headers: {
@@ -35,16 +41,33 @@ const createBackendClient = () => {
               },
             });
 
+            const duration = Date.now() - startTime;
+            console.log('[UnifiedUser] Request completed:', {
+              url,
+              status: response.status,
+              statusText: response.statusText,
+              duration: `${duration}ms`,
+            });
+
             if (!response.ok) {
-              console.error('[UnifiedUser] Request failed:', response.status, response.statusText);
+              console.error('[UnifiedUser] ❌ Request failed:', {
+                status: response.status,
+                statusText: response.statusText,
+                url,
+              });
               const errorClone = response.clone();
               const errorText = await errorClone.text().catch(() => 'Unknown error');
-              console.error('[UnifiedUser] Error response:', errorText);
+              console.error('[UnifiedUser] Error response body:', errorText.substring(0, 500));
             }
 
             return response;
-          } catch (error) {
-            console.error('[UnifiedUser] Fetch error:', error);
+          } catch (error: any) {
+            console.error('[UnifiedUser] ❌ Fetch error:', {
+              message: error?.message,
+              error,
+              url,
+              stack: error?.stack,
+            });
             throw error;
           }
         },
@@ -90,7 +113,76 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
 
   // Load user on init
   useEffect(() => {
+    // Log API configuration
+    console.log('[UnifiedUser] Backend API URL:', config.API_URL);
+    console.log('[UnifiedUser] Full tRPC URL:', `${config.API_URL}/api/trpc`);
+    
+    // Test backend connectivity (non-blocking)
+    const testBackendConnectivity = async () => {
+      try {
+        const testClient = createBackendClient();
+        // Try a simple query to test connectivity
+        const testResult = await testClient.user.get.query({ email: 'test@test.com' });
+        console.log('[UnifiedUser] Backend connectivity test:', {
+          reachable: true,
+          responseReceived: true,
+        });
+      } catch (error: any) {
+        const errorMessage = error?.message || String(error);
+        const isNetworkError = errorMessage.includes('Network') || 
+                              errorMessage.includes('fetch') || 
+                              errorMessage.includes('Failed to fetch') ||
+                              errorMessage.includes('ECONNREFUSED');
+        
+        console.warn('[UnifiedUser] Backend connectivity test:', {
+          reachable: false,
+          isNetworkError,
+          error: errorMessage.substring(0, 200),
+        });
+        
+        if (isNetworkError) {
+          console.warn('[UnifiedUser] ⚠️ Backend appears to be unreachable - database operations may fail');
+          console.warn('[UnifiedUser] ⚠️ Users can still sign in with Supabase, but data won\'t sync to database');
+        }
+      }
+    };
+    
+    // Test connectivity after a short delay (non-blocking)
+    setTimeout(testBackendConnectivity, 1000);
+    
     loadUser();
+    
+    // Listen for Supabase auth state changes to sync with unified user store
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('[UnifiedUser] Supabase auth state changed:', event);
+      
+      if (event === 'SIGNED_IN' && session?.user) {
+        // User signed in - check if unified user store needs to be updated
+        const storedUser = await AsyncStorage.getItem(STORAGE_KEYS.USER);
+        if (storedUser) {
+          const userData = JSON.parse(storedUser);
+          // If user is guest but we have Supabase session, we need to restore registered user
+          if (userData.isGuest === true) {
+            console.log('[UnifiedUser] Supabase session detected but user is guest, triggering sign-in to restore user...');
+            // The unified user store's signIn should have been called, but if it wasn't,
+            // we need to reload user data. For now, reload user after a delay to let signIn complete
+            setTimeout(async () => {
+              await loadUser();
+            }, 2000);
+          }
+        } else {
+          // No user in storage but we have Supabase session - need to restore
+          console.log('[UnifiedUser] Supabase session detected but no user in storage, will be restored by signIn');
+        }
+      } else if (event === 'SIGNED_OUT') {
+        // User signed out - unified user store's signOut should handle this
+        console.log('[UnifiedUser] Supabase session signed out');
+      }
+    });
+    
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signInWithGoogle = useCallback(async (): Promise<boolean> => {
@@ -332,6 +424,9 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
 
   const loadUser = async () => {
     try {
+      // First check for Supabase session - if we have one, we should have a registered user
+      const { data: { session } } = await supabase.auth.getSession();
+      
       // Check if we have a stored user
       const storedUser = await AsyncStorage.getItem(STORAGE_KEYS.USER);
       
@@ -342,10 +437,80 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         if (parsed.subscriptionExpiresAt) parsed.subscriptionExpiresAt = new Date(parsed.subscriptionExpiresAt);
         if (parsed.subscriptionPurchasedAt) parsed.subscriptionPurchasedAt = new Date(parsed.subscriptionPurchasedAt);
         
+        // If we have a Supabase session but stored user is guest, we need to restore registered user
+        if (session?.user && parsed.isGuest === true) {
+          console.warn('[UnifiedUser] Supabase session exists but user is marked as guest - restoring registered user...');
+          // Try to restore user data by calling signIn with the session
+          // We'll need to fetch user data from the database
+          try {
+            const directClient = createBackendClient();
+            const result = await directClient.user.get.query({ supabaseId: session.user.id });
+            if (result.success && result.user) {
+              const dbUser = result.user;
+              const userData: UnifiedUser = {
+                id: dbUser.id || session.user.id,
+                email: dbUser.email || session.user.email || null,
+                name: dbUser.name || null,
+                username: dbUser.username || null,
+                profilePicture: dbUser.profilePicture || null,
+                mode: 'registered',
+                isGuest: false,
+                createdAt: dbUser.createdAt ? new Date(dbUser.createdAt) : new Date(),
+                subscriptionPlan: (dbUser.subscriptionPlan || 'free') as any,
+                subscriptionStatus: dbUser.subscriptionStatus as any,
+                subscriptionExpiresAt: dbUser.subscriptionExpiresAt ? new Date(dbUser.subscriptionExpiresAt) : null,
+                subscriptionPurchasedAt: dbUser.subscriptionPurchasedAt ? new Date(dbUser.subscriptionPurchasedAt) : null,
+              };
+              await saveUser(userData);
+              await restoreServerDataToLocal(dbUser);
+              console.log('[UnifiedUser] ✅ Restored registered user from Supabase session');
+              return; // Exit early since we've set the user
+            }
+          } catch (restoreError) {
+            console.error('[UnifiedUser] Error restoring user from Supabase session:', restoreError);
+            // Continue with loading guest user as fallback
+          }
+        }
+        
         setUserInternal(parsed);
       } else {
-        // Create guest user
-        await createGuestUser();
+        // No stored user - check if we have Supabase session
+        if (session?.user) {
+          console.log('[UnifiedUser] No stored user but Supabase session exists - restoring registered user...');
+          // Try to restore user data from database
+          try {
+            const directClient = createBackendClient();
+            const result = await directClient.user.get.query({ supabaseId: session.user.id });
+            if (result.success && result.user) {
+              const dbUser = result.user;
+              const userData: UnifiedUser = {
+                id: dbUser.id || session.user.id,
+                email: dbUser.email || session.user.email || null,
+                name: dbUser.name || null,
+                username: dbUser.username || null,
+                profilePicture: dbUser.profilePicture || null,
+                mode: 'registered',
+                isGuest: false,
+                createdAt: dbUser.createdAt ? new Date(dbUser.createdAt) : new Date(),
+                subscriptionPlan: (dbUser.subscriptionPlan || 'free') as any,
+                subscriptionStatus: dbUser.subscriptionStatus as any,
+                subscriptionExpiresAt: dbUser.subscriptionExpiresAt ? new Date(dbUser.subscriptionExpiresAt) : null,
+                subscriptionPurchasedAt: dbUser.subscriptionPurchasedAt ? new Date(dbUser.subscriptionPurchasedAt) : null,
+              };
+              await saveUser(userData);
+              await restoreServerDataToLocal(dbUser);
+              console.log('[UnifiedUser] ✅ Restored registered user from Supabase session (no stored user)');
+              return; // Exit early since we've set the user
+            }
+          } catch (restoreError) {
+            console.error('[UnifiedUser] Error restoring user from Supabase session:', restoreError);
+            // Create guest user as fallback
+            await createGuestUser();
+          }
+        } else {
+          // No session, no stored user - create guest user
+          await createGuestUser();
+        }
       }
     } catch (error) {
       console.error('[UnifiedUser] Error loading user:', error);
@@ -781,15 +946,43 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         };
 
         try {
-          await createUserMutation.mutateAsync(createPayload);
-          console.log('[UnifiedUser] ✅ User created in database with guest data via mutation');
-        } catch (dbError) {
-          console.warn('[UnifiedUser] user.create mutation failed during sign up, attempting direct client fallback:', dbError);
+          console.log('[UnifiedUser] Attempting to create user in database via mutation...');
+          console.log('[UnifiedUser] Create payload summary:', {
+            email: createPayload.email,
+            hasName: !!createPayload.name,
+            hasSupabaseId: !!createPayload.supabaseId,
+            hasGuestData: !!createPayload.guestData,
+            guestDataKeys: createPayload.guestData ? Object.keys(createPayload.guestData) : [],
+          });
+          
+          const createResult = await createUserMutation.mutateAsync(createPayload);
+          console.log('[UnifiedUser] ✅ User created in database with guest data via mutation:', {
+            success: createResult.success,
+            hasUser: !!createResult.user,
+            userId: createResult.user?.id,
+          });
+        } catch (dbError: any) {
+          console.error('[UnifiedUser] ❌ user.create mutation failed during sign up:', {
+            message: dbError?.message,
+            error: dbError,
+            stack: dbError?.stack,
+          });
+          console.log('[UnifiedUser] Attempting direct client fallback...');
           try {
-            await directClient.user.create.mutate(createPayload);
-            console.log('[UnifiedUser] ✅ User created in database with guest data via direct client fallback');
-          } catch (directDbError) {
-            console.warn('[UnifiedUser] Database creation error (non-critical):', directDbError);
+            const directResult = await directClient.user.create.mutate(createPayload);
+            console.log('[UnifiedUser] ✅ User created in database with guest data via direct client fallback:', {
+              success: directResult.success,
+              hasUser: !!directResult.user,
+              userId: directResult.user?.id,
+            });
+          } catch (directDbError: any) {
+            console.error('[UnifiedUser] ❌ Database creation error (direct client also failed):', {
+              message: directDbError?.message,
+              error: directDbError,
+              stack: directDbError?.stack,
+            });
+            console.warn('[UnifiedUser] ⚠️ Continuing sign-up - user is created in Supabase and local storage');
+            console.warn('[UnifiedUser] ⚠️ Data will be synced to database when backend becomes available');
           // Continue anyway - user is created in Supabase and local storage
           // Data will be synced to database when backend becomes available
           }
@@ -823,6 +1016,16 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       await clearGuestData();
       
       console.log('[UnifiedUser] ✅ Sign up complete, guest data migrated');
+      console.log('[UnifiedUser] Sign-up summary:', {
+        backendSignupSucceeded,
+        hasSupabaseUserId: !!supabaseUserId,
+        supabaseUserId,
+        userId: registeredUser.id,
+        email: registeredUser.email,
+        isGuest: registeredUser.isGuest,
+        subscriptionPlan: registeredUser.subscriptionPlan,
+        hasSupabaseSession: true,
+      });
       
       return { success: true, user: registeredUser };
     } catch (error) {
@@ -885,97 +1088,167 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       
       // 3. Fetch user data from database using direct client
       const directClient = createBackendClient();
+      console.log('[UnifiedUser] Attempting to fetch user from database, Supabase ID:', authData.user.id);
       
       // Try to get user from database
       let dbUser;
       try {
+        console.log('[UnifiedUser] Querying database for user by Supabase ID...');
         const result = await directClient.user.get.query({ supabaseId: authData.user.id });
+        console.log('[UnifiedUser] Database query result:', { 
+          success: result.success, 
+          hasUser: !!result.user,
+          userId: result.user?.id,
+          email: result.user?.email 
+        });
+        
         if (result.success && result.user) {
           dbUser = result.user;
+          console.log('[UnifiedUser] ✅ User found in database by Supabase ID');
         } else {
           // User not found in database, try by email
+          console.log('[UnifiedUser] User not found by Supabase ID, trying by email...');
           const emailResult = await directClient.user.get.query({ email: authData.user.email || email });
+          console.log('[UnifiedUser] Database query by email result:', { 
+            success: emailResult.success, 
+            hasUser: !!emailResult.user,
+            userId: emailResult.user?.id 
+          });
+          
           if (emailResult.success && emailResult.user) {
             dbUser = emailResult.user;
+            console.log('[UnifiedUser] ✅ User found in database by email');
             // Note: supabaseId update would need to be added to updateUserProcedure if needed
             // For now, we'll continue with the existing user
           } else {
             // User doesn't exist in database - create it
-            console.log('[UnifiedUser] User not found in database, creating...');
+            console.log('[UnifiedUser] ⚠️ User not found in database, creating new user record...');
             try {
-              const createResult = await directClient.user.create.mutate({
+              const createPayload = {
                 email: authData.user.email || email,
                 name: authData.user.user_metadata?.name || authData.user.user_metadata?.full_name || null,
                 supabaseId: authData.user.id,
                 revenueCatUserId: authData.user.email || email,
                 isGuest: false,
+              };
+              console.log('[UnifiedUser] Creating user in database with payload:', {
+                email: createPayload.email,
+                hasName: !!createPayload.name,
+                hasSupabaseId: !!createPayload.supabaseId,
               });
+              
+              const createResult = await directClient.user.create.mutate(createPayload);
+              console.log('[UnifiedUser] User create result:', {
+                success: createResult.success,
+                hasUser: !!createResult.user,
+                userId: createResult.user?.id,
+              });
+              
               if (createResult.success && createResult.user) {
+                console.log('[UnifiedUser] ✅ User created in database successfully');
                 // Fetch the newly created user
                 const newUserResult = await directClient.user.get.query({ email: authData.user.email || email });
                 if (newUserResult.success && newUserResult.user) {
                   dbUser = newUserResult.user;
+                  console.log('[UnifiedUser] ✅ Verified newly created user in database');
                 } else {
+                  console.error('[UnifiedUser] ❌ Failed to retrieve newly created user:', newUserResult);
                   throw new Error('Failed to retrieve newly created user');
                 }
               } else {
+                console.error('[UnifiedUser] ❌ Failed to create user in database:', createResult);
                 throw new Error('Failed to create user in database');
               }
-            } catch (createError) {
-              console.error('[UnifiedUser] Failed to create user in database:', createError);
-              throw new Error('User account not found. Please sign up first.');
+            } catch (createError: any) {
+              console.error('[UnifiedUser] ❌ Database creation error:', {
+                message: createError?.message,
+                error: createError,
+                stack: createError?.stack,
+              });
+              // Don't throw - allow sign-in to continue with Supabase auth only
+              // User can still use the app, data will sync when backend is available
+              console.warn('[UnifiedUser] ⚠️ Continuing sign-in without database user (backend may be unavailable)');
             }
           }
         }
-      } catch (getUserError) {
-        console.error('[UnifiedUser] Error fetching user from database:', getUserError);
-        throw new Error('Failed to load user data. Please try again.');
-      }
-      
-      if (!dbUser) {
-        throw new Error('User data not found in database');
+      } catch (getUserError: any) {
+        console.error('[UnifiedUser] ❌ Error fetching user from database:', {
+          message: getUserError?.message,
+          error: getUserError,
+          stack: getUserError?.stack,
+        });
+        // Don't throw - allow sign-in to continue with Supabase auth only
+        // User can still use the app, data will sync when backend is available
+        console.warn('[UnifiedUser] ⚠️ Continuing sign-in without database user (backend may be unavailable)');
       }
       
       // 4. Create user object with subscription data FIRST (before restoring data)
       // This ensures subscription status is available for the restore function
-      const userData: UnifiedUser = {
-        id: dbUser.id || authData.user.id,
-        email: dbUser.email || authData.user.email || null,
-        name: dbUser.name || null,
-        username: dbUser.username || null,
-        profilePicture: dbUser.profilePicture || null,
-        mode: 'registered',
-        isGuest: false,
-        createdAt: dbUser.createdAt ? new Date(dbUser.createdAt) : new Date(),
-        subscriptionPlan: (dbUser.subscriptionPlan || 'free') as any,
-        subscriptionStatus: dbUser.subscriptionStatus as any,
-        subscriptionExpiresAt: dbUser.subscriptionExpiresAt ? new Date(dbUser.subscriptionExpiresAt) : null,
-        subscriptionPurchasedAt: dbUser.subscriptionPurchasedAt ? new Date(dbUser.subscriptionPurchasedAt) : null,
-      };
+      let userData: UnifiedUser;
       
-      // 5. Save user data to local storage FIRST (so restore function can check premium status)
-      await saveUser(userData);
-      console.log('[UnifiedUser] User data saved with subscription:', {
-        plan: userData.subscriptionPlan,
-        status: userData.subscriptionStatus,
-        expiresAt: userData.subscriptionExpiresAt,
-        isLifetime: userData.subscriptionPlan === 'lifetime',
-      });
-      
-      // 6. Restore server data to local storage (this will also trigger ambition store reload)
-      // This must happen AFTER user data is saved so premium check works
-      console.log('[UnifiedUser] About to restore server data, dbUser:', {
-        id: dbUser.id,
-        email: dbUser.email,
-        hasGoal: !!dbUser.goal,
-        hasRoadmap: !!dbUser.roadmap,
-        hasCompletedTasks: !!dbUser.completedTasks,
-        subscriptionPlan: dbUser.subscriptionPlan,
-        subscriptionStatus: dbUser.subscriptionStatus,
-        goalLength: dbUser.goal?.length || 0,
-        roadmapLength: dbUser.roadmap?.length || 0,
-      });
-      await restoreServerDataToLocal(dbUser);
+      if (!dbUser) {
+        console.warn('[UnifiedUser] ⚠️ No database user found, creating fallback user from Supabase data');
+        // Create fallback user from Supabase data
+        // This allows sign-in to work even if backend is unavailable
+        userData = {
+          id: authData.user.id,
+          email: authData.user.email || email,
+          name: authData.user.user_metadata?.name || null,
+          username: null,
+          profilePicture: null,
+          mode: 'registered',
+          isGuest: false,
+          createdAt: new Date(),
+          subscriptionPlan: 'free',
+          subscriptionStatus: null,
+          subscriptionExpiresAt: null,
+          subscriptionPurchasedAt: null,
+        };
+        
+        await saveUser(userData);
+        console.log('[UnifiedUser] ✅ Created fallback user from Supabase data');
+        console.log('[UnifiedUser] ⚠️ Note: Backend may be unavailable - data will sync when backend is available');
+      } else {
+        // Use database user data
+        userData = {
+          id: dbUser.id || authData.user.id,
+          email: dbUser.email || authData.user.email || null,
+          name: dbUser.name || null,
+          username: dbUser.username || null,
+          profilePicture: dbUser.profilePicture || null,
+          mode: 'registered',
+          isGuest: false,
+          createdAt: dbUser.createdAt ? new Date(dbUser.createdAt) : new Date(),
+          subscriptionPlan: (dbUser.subscriptionPlan || 'free') as any,
+          subscriptionStatus: dbUser.subscriptionStatus as any,
+          subscriptionExpiresAt: dbUser.subscriptionExpiresAt ? new Date(dbUser.subscriptionExpiresAt) : null,
+          subscriptionPurchasedAt: dbUser.subscriptionPurchasedAt ? new Date(dbUser.subscriptionPurchasedAt) : null,
+        };
+        
+        // 5. Save user data to local storage FIRST (so restore function can check premium status)
+        await saveUser(userData);
+        console.log('[UnifiedUser] User data saved with subscription:', {
+          plan: userData.subscriptionPlan,
+          status: userData.subscriptionStatus,
+          expiresAt: userData.subscriptionExpiresAt,
+          isLifetime: userData.subscriptionPlan === 'lifetime',
+        });
+        
+        // 6. Restore server data to local storage (this will also trigger ambition store reload)
+        // This must happen AFTER user data is saved so premium check works
+        console.log('[UnifiedUser] About to restore server data, dbUser:', {
+          id: dbUser.id,
+          email: dbUser.email,
+          hasGoal: !!dbUser.goal,
+          hasRoadmap: !!dbUser.roadmap,
+          hasCompletedTasks: !!dbUser.completedTasks,
+          subscriptionPlan: dbUser.subscriptionPlan,
+          subscriptionStatus: dbUser.subscriptionStatus,
+          goalLength: dbUser.goal?.length || 0,
+          roadmapLength: dbUser.roadmap?.length || 0,
+        });
+        await restoreServerDataToLocal(dbUser);
+      }
       
       // 7. Trigger initial sync for premium users to ensure any local changes are synced to database
       // This ensures data consistency after sign-in
@@ -1001,7 +1274,16 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         }, 1000);
       }
       
-      console.log('[UnifiedUser] ✅ Sign in complete, server data restored to local storage');
+      console.log('[UnifiedUser] ✅ Sign in complete');
+      console.log('[UnifiedUser] Sign-in summary:', {
+        hasDatabaseUser: !!dbUser,
+        userId: userData.id,
+        email: userData.email,
+        isGuest: userData.isGuest,
+        subscriptionPlan: userData.subscriptionPlan,
+        hasSupabaseSession: !!authData.session,
+        supabaseUserId: authData.user.id,
+      });
       
       return { success: true, user: userData };
     } catch (error) {
@@ -1043,33 +1325,8 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
     try {
       console.log('[UnifiedUser] Signing out...');
       
-      // 1. Sign out from Supabase and wait for it to complete
-      const { error: signOutError } = await supabase.auth.signOut();
-      if (signOutError) {
-        console.warn('[UnifiedUser] Supabase sign out error:', signOutError);
-      }
-      
-      // Wait a moment to ensure Supabase session is fully cleared
-      await new Promise(resolve => setTimeout(resolve, 200));
-      
-      // Verify session is cleared
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        console.warn('[UnifiedUser] Session still exists after sign out, forcing clear');
-        // Force clear by signing out again
-        await supabase.auth.signOut();
-        await new Promise(resolve => setTimeout(resolve, 200));
-      }
-      
-      // 2. Logout from RevenueCat
-      try {
-        await Purchases.logOut();
-        console.log('[UnifiedUser] RevenueCat logged out');
-      } catch (rcError) {
-        console.warn('[UnifiedUser] RevenueCat logout failed:', rcError);
-      }
-      
-      // 3. Clear ALL user data from AsyncStorage
+      // 1. Clear ALL user data from AsyncStorage FIRST (before Supabase sign out)
+      // This prevents auth-store from restoring state on restart
       console.log('[UnifiedUser] Clearing all user data from storage...');
       await Promise.all([
         // Clear unified user data
@@ -1092,8 +1349,71 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         AsyncStorage.removeItem('ambitionly_user'),
       ]);
       
-      // 4. Reset internal state
+      // 2. Reset internal state immediately
       setUserInternal(null);
+      
+      // 3. Sign out from Supabase multiple times to ensure session is fully cleared
+      // Supabase stores sessions in SecureStore, so we need to be thorough
+      let attempts = 0;
+      const maxAttempts = 3;
+      while (attempts < maxAttempts) {
+        const { error: signOutError } = await supabase.auth.signOut();
+        if (signOutError) {
+          console.warn(`[UnifiedUser] Supabase sign out error (attempt ${attempts + 1}):`, signOutError);
+        }
+        
+        // Wait for session to clear
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        // Verify session is cleared
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          console.log('[UnifiedUser] Supabase session cleared successfully');
+          break;
+        } else {
+          attempts++;
+          console.warn(`[UnifiedUser] Session still exists after sign out (attempt ${attempts}/${maxAttempts})`);
+          if (attempts < maxAttempts) {
+            // Try clearing SecureStore directly if available
+            try {
+              const { Platform } = require('react-native');
+              if (Platform.OS !== 'web') {
+                const SecureStore = require('expo-secure-store');
+                // Supabase stores session in a key like 'supabase.auth.token'
+                // Try to clear common Supabase storage keys
+                const supabaseKeys = [
+                  'supabase.auth.token',
+                  'sb-auth-token',
+                  'supabase.auth.token.anonymous',
+                ];
+                for (const key of supabaseKeys) {
+                  try {
+                    await SecureStore.deleteItemAsync(key);
+                  } catch (e) {
+                    // Key might not exist, ignore
+                  }
+                }
+              }
+            } catch (secureStoreError) {
+              console.warn('[UnifiedUser] Could not clear SecureStore directly:', secureStoreError);
+            }
+          }
+        }
+      }
+      
+      // Final verification
+      const { data: { session: finalSession } } = await supabase.auth.getSession();
+      if (finalSession) {
+        console.error('[UnifiedUser] ⚠️ WARNING: Supabase session still exists after all sign out attempts');
+      }
+      
+      // 4. Logout from RevenueCat
+      try {
+        await Purchases.logOut();
+        console.log('[UnifiedUser] RevenueCat logged out');
+      } catch (rcError) {
+        console.warn('[UnifiedUser] RevenueCat logout failed:', rcError);
+      }
       
       // 5. Create fresh guest user with new ID
       const newGuestId = generateGuestId();
@@ -1127,7 +1447,7 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       console.log('[UnifiedUser] Emitted user-signed-out event');
       
       // 8. Wait a bit more to ensure all state is cleared before navigation
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await new Promise(resolve => setTimeout(resolve, 500));
       
       console.log('[UnifiedUser] ✅ Signed out, fresh guest session created');
     } catch (error) {
@@ -1278,4 +1598,6 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
     updateSubscription,
   ]);
 });
+
+
 

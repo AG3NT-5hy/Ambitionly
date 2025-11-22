@@ -87,6 +87,36 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     try {
       if (!supabaseSession?.user) return false;
 
+      // Check if user has explicitly signed out by checking if unified user is a guest
+      // If unified user store has a guest user, don't restore Supabase session
+      try {
+        const { STORAGE_KEYS } = await import('../constants');
+        const storedUser = await AsyncStorage.getItem(STORAGE_KEYS.USER);
+        if (storedUser) {
+          const userData = JSON.parse(storedUser);
+          // If unified user is a guest, don't sync Supabase session (user signed out)
+          if (userData.isGuest === true) {
+            console.log('[AuthStore] Unified user is guest, ignoring Supabase session (user signed out)');
+            // Clear Supabase session since user signed out
+            await supabase.auth.signOut();
+            return false;
+          }
+        } else {
+          // No unified user found, check if auth tokens were cleared (sign out happened)
+          const authToken = await AsyncStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+          if (!authToken) {
+            console.log('[AuthStore] No auth token found, user signed out, ignoring Supabase session');
+            // Clear Supabase session since user signed out
+            await supabase.auth.signOut();
+            return false;
+          }
+        }
+      } catch (checkError) {
+        console.warn('[AuthStore] Error checking unified user state:', checkError);
+        // If we can't check, be conservative and don't sync
+        return false;
+      }
+
       const supabaseUser = supabaseSession.user;
       const email = supabaseUser.email;
       const supabaseId = supabaseUser.id;
@@ -156,10 +186,34 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
   // Listen for Supabase auth changes
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    // Get initial session - but check if user signed out first
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session) {
-        syncSupabaseSession(session);
+        // Check if user has signed out before syncing
+        try {
+          const { STORAGE_KEYS } = await import('../constants');
+          const storedUser = await AsyncStorage.getItem(STORAGE_KEYS.USER);
+          const authToken = await AsyncStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+          
+          // If unified user is guest or no auth token, user signed out - clear Supabase session
+          if (storedUser) {
+            const userData = JSON.parse(storedUser);
+            if (userData.isGuest === true) {
+              console.log('[AuthStore] User is guest, clearing Supabase session on startup');
+              await supabase.auth.signOut();
+              return;
+            }
+          } else if (!authToken) {
+            console.log('[AuthStore] No auth token found, clearing Supabase session on startup');
+            await supabase.auth.signOut();
+            return;
+          }
+        } catch (checkError) {
+          console.warn('[AuthStore] Error checking user state on startup:', checkError);
+        }
+        
+        // Only sync if user hasn't signed out
+        await syncSupabaseSession(session);
       }
     });
 
