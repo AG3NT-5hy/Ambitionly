@@ -33,6 +33,7 @@ export const signupProcedure = publicProcedure
         throw new Error('Database connection failed. Please check DATABASE_URL environment variable.');
       }
 
+      // Check if user exists in database
       const existingUser = await prisma.user.findUnique({
         where: { email: input.email },
       }).catch((error) => {
@@ -46,22 +47,7 @@ export const signupProcedure = publicProcedure
 
       const hashedPassword = await hashPassword(input.password);
 
-      // Create user in Prisma database
-      const user = await prisma.user.create({
-        data: {
-          email: input.email,
-          password: hashedPassword,
-        },
-      }).catch((error) => {
-        console.error('[Signup] User creation error:', error);
-        // Check for specific Prisma errors
-        if (error.code === 'P2002') {
-          throw new Error('Email already registered');
-        }
-        throw new Error('Failed to create user account. Please try again.');
-      });
-
-      // Create corresponding user in Supabase
+      // Try to create user in Supabase first (or get existing one)
       let supabaseUserId: string | null = null;
       try {
         const { data: supabaseData, error: supabaseError } = await supabaseAdmin.auth.admin.createUser({
@@ -71,29 +57,52 @@ export const signupProcedure = publicProcedure
         });
 
         if (supabaseError) {
-          console.warn('[Signup] Failed to create Supabase user:', supabaseError);
           // Check if user already exists in Supabase
-          if (supabaseError.message?.includes('already registered') || supabaseError.message?.includes('already exists')) {
-            console.log('[Signup] User already exists in Supabase, continuing...');
+          if (supabaseError.message?.includes('already registered') || 
+              supabaseError.message?.includes('already exists') ||
+              supabaseError.message?.includes('User already registered')) {
+            console.log('[Signup] User already exists in Supabase but not in database, fetching existing user...');
+            // User exists in Supabase but not in database - get the existing Supabase user
+            try {
+              const { data: { users } } = await supabaseAdmin.auth.admin.listUsers();
+              const foundUser = users.find(u => u.email === input.email);
+              if (foundUser) {
+                supabaseUserId = foundUser.id;
+                console.log('[Signup] Found existing Supabase user, will link to database record');
+              } else {
+                console.warn('[Signup] Supabase says user exists but could not find them in list');
+              }
+            } catch (listError) {
+              console.warn('[Signup] Failed to list Supabase users:', listError);
+            }
+          } else {
+            // Other Supabase error - log but continue
+            console.warn('[Signup] Failed to create Supabase user:', supabaseError);
           }
         } else {
+          // Successfully created Supabase user
           supabaseUserId = supabaseData.user?.id || null;
-          
-          // Update Prisma user with Supabase ID
-          if (supabaseUserId) {
-            await prisma.user.update({
-              where: { id: user.id },
-              data: { supabaseId: supabaseUserId },
-            }).catch((error) => {
-              console.warn('[Signup] Failed to update user with Supabase ID:', error);
-              // Non-critical, continue
-            });
-          }
         }
       } catch (error) {
         console.warn('[Signup] Supabase user creation failed:', error);
-        // Continue without Supabase user - not critical for signup
+        // Continue without Supabase user - we'll create database record anyway
       }
+
+      // Create user in Prisma database (with Supabase ID if we have it)
+      const user = await prisma.user.create({
+        data: {
+          email: input.email,
+          password: hashedPassword,
+          supabaseId: supabaseUserId, // Link to Supabase user (existing or newly created)
+        },
+      }).catch((error: any) => {
+        console.error('[Signup] User creation error:', error);
+        // Check for specific Prisma errors
+        if (error.code === 'P2002') {
+          throw new Error('Email already registered');
+        }
+        throw new Error('Failed to create user account. Please try again.');
+      });
 
       const token = generateToken(user.id);
 

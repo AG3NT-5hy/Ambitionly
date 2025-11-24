@@ -199,12 +199,35 @@ export default function AuthScreen() {
     } catch (err) {
       clearTimeout(timeoutId);
       setIsLoading(false);
-      const errorMessage = err instanceof Error ? err.message : 'An error occurred. Please try again.';
+      let errorMessage = err instanceof Error ? err.message : 'An error occurred. Please try again.';
       
       console.error('[Auth] Sign in/up error:', err);
       
+      // Handle JSON parse errors first
+      if (errorMessage.includes('JSON Parse error') || 
+          errorMessage.includes('Unexpected character') ||
+          errorMessage.includes('invalid JSON') ||
+          errorMessage.includes('non-JSON') ||
+          errorMessage.includes('Unable to connect to the server') ||
+          errorMessage.includes('Server returned non-JSON') ||
+          errorMessage.includes('Server returned invalid JSON') ||
+          errorMessage.includes('Backend is running') ||
+          errorMessage.includes('API URL')) {
+        errorMessage = 'Unable to connect to the server. Please check your internet connection and try again.';
+      } else if (errorMessage.includes('Network request failed') || 
+                 errorMessage.includes('fetch') ||
+                 errorMessage.includes('network') ||
+                 errorMessage.includes('ECONNREFUSED') ||
+                 errorMessage.includes('ERR_NETWORK') ||
+                 errorMessage.includes('Failed to fetch')) {
+        errorMessage = 'Network error. Please check your internet connection and try again.';
+      }
+      
       // Check if it's an "already registered" error and automatically switch to sign-in
-      if (errorMessage.includes('already registered') || errorMessage.includes('Email already') || errorMessage.includes('already exists')) {
+      // But only if it's not a JSON parse or network error
+      if (!errorMessage.includes('Unable to connect') && 
+          !errorMessage.includes('Network error') &&
+          (errorMessage.includes('already registered') || errorMessage.includes('Email already') || errorMessage.includes('already exists'))) {
         // Switch to sign-in mode automatically
         setIsLogin(true);
         setError('This email is already registered. We\'ve switched you to sign in. Please enter your password to continue.');
@@ -220,8 +243,16 @@ export default function AuthScreen() {
     setError('');
     setIsLoadingGoogle(true);
     
+    // Add timeout to prevent infinite loading
+    const timeoutId = setTimeout(() => {
+      console.error('[Auth] Google sign-in timeout - taking too long');
+      setIsLoadingGoogle(false);
+      setError('Request timed out. Please try again.');
+    }, 30000); // 30 second timeout
+    
     try {
       const success = await signInWithGoogle();
+      clearTimeout(timeoutId);
       
       if (success) {
         // Wait for unified user store to save user data to AsyncStorage
@@ -285,10 +316,51 @@ export default function AuthScreen() {
           router.replace('/welcome?noRoadmap=true');
         }
       } else {
+        clearTimeout(timeoutId);
+        setIsLoadingGoogle(false);
         setError('Failed to sign in with Google. Please try again.');
       }
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to sign in with Google. Please try again.';
+      clearTimeout(timeoutId);
+      let errorMessage = 'Failed to sign in with Google. Please try again.';
+      
+      if (err instanceof Error) {
+        const msg = err.message || '';
+        
+        // Provide user-friendly error messages
+        if (msg.includes('JSON Parse error') || 
+            msg.includes('Unexpected character') ||
+            msg.includes('invalid JSON') ||
+            msg.includes('non-JSON') ||
+            msg.includes('Unable to connect to the server') ||
+            msg.includes('Backend is running') ||
+            msg.includes('Server returned non-JSON') ||
+            msg.includes('Server returned invalid JSON')) {
+          errorMessage = 'Unable to connect to the server. Please check your internet connection and try again.';
+        } else if (msg.includes('Network request failed') || 
+                   msg.includes('fetch') ||
+                   msg.includes('network') ||
+                   msg.includes('ECONNREFUSED') ||
+                   msg.includes('ERR_NETWORK') ||
+                   msg.includes('Failed to fetch')) {
+          errorMessage = 'Network error. Please check your internet connection and try again.';
+        } else if (msg.includes('cancel') || msg.includes('cancelled') || msg.includes('SIGN_IN_CANCELLED')) {
+          // User cancelled - don't show error, just return
+          setIsLoadingGoogle(false);
+          return;
+        } else if (msg.includes('already registered') || msg.includes('Email already') || msg.includes('already exists')) {
+          // User already exists - switch to sign-in mode
+          setIsLogin(true);
+          errorMessage = 'This email is already registered. We\'ve switched you to sign in. Please use your password to continue.';
+        } else if (msg.includes('Request timed out')) {
+          errorMessage = 'Request timed out. Please check your internet connection and try again.';
+        } else if (msg) {
+          // Use the error message if it's already user-friendly
+          errorMessage = msg;
+        }
+      }
+      
+      console.error('[Auth] Google sign-in error:', err);
       setError(errorMessage);
     } finally {
       setIsLoadingGoogle(false);

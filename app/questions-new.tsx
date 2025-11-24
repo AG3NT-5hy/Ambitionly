@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Animated, TouchableWithoutFeedback, Keyboard, Platform } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Animated, TouchableWithoutFeedback, Keyboard, Platform, KeyboardAvoidingView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -139,95 +139,101 @@ export default function QuestionsScreen() {
         style={styles.container}
       >
         <SafeAreaView style={styles.safeArea}>
-          <View style={styles.header}>
-            <View style={styles.progressContainer}>
-              {questions.map((question, index) => (
-                <View
-                  key={question.id}
-                  style={[
-                    styles.progressDot,
-                    index <= currentQuestionIndex && styles.progressDotActive,
-                  ]}
-                />
-              ))}
-            </View>
-            <Text style={styles.stepCounter}>
-              {currentQuestionIndex + 1} of {questions.length}
-            </Text>
-          </View>
-
-          <Animated.View
-            style={[
-              styles.content,
-              {
-                opacity: fadeAnim,
-                transform: [{ translateY: slideAnim }],
-              },
-            ]}
+          <KeyboardAvoidingView
+            style={styles.keyboardAvoiding}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
           >
-            <View style={styles.questionHeader}>
-              <View style={styles.iconContainer}>
-                <Target size={32} color="#00E6E6" />
+            <View style={styles.header}>
+              <View style={styles.progressContainer}>
+                {questions.map((question, index) => (
+                  <View
+                    key={question.id}
+                    style={[
+                      styles.progressDot,
+                      index <= currentQuestionIndex && styles.progressDotActive,
+                    ]}
+                  />
+                ))}
               </View>
-              <Text style={styles.questionTitle}>{currentQuestion.title}</Text>
-              <Text style={styles.questionSubtitle}>{currentQuestion.subtitle}</Text>
+              <Text style={styles.stepCounter}>
+                {currentQuestionIndex + 1} of {questions.length}
+              </Text>
             </View>
 
-            <View style={styles.inputContainer}>
-              <TextInput
-                style={styles.textInput}
-                placeholder={currentQuestion.placeholder}
-                placeholderTextColor="#666666"
-                value={answer}
-                onChangeText={setAnswer}
-                multiline
-                numberOfLines={4}
-                textAlignVertical="top"
-                returnKeyType="done"
-                blurOnSubmit={true}
-                accessibilityLabel={`Answer for: ${currentQuestion.title}`}
-                accessibilityHint="Enter your answer to this question"
-                maxLength={1000}
-                {...Platform.select({
-                  android: {
-                    underlineColorAndroid: 'transparent',
-                    autoCorrect: false,
-                    autoCapitalize: 'sentences',
-                  },
-                })}
-              />
-            </View>
-          </Animated.View>
-
-          <View style={styles.footer}>
-            <TouchableOpacity
+            <Animated.View
               style={[
-                styles.nextButton,
-                !canProceed() && styles.nextButtonDisabled,
+                styles.content,
+                {
+                  opacity: fadeAnim,
+                  transform: [{ translateY: slideAnim }],
+                },
               ]}
-              onPress={handleNext}
-              disabled={!canProceed()}
-              accessibilityLabel={currentQuestionIndex === questions.length - 1 ? 'Generate Roadmap' : 'Next Question'}
-              accessibilityHint={currentQuestionIndex === questions.length - 1 ? 'Generate your personalized roadmap' : 'Go to next question'}
-              accessibilityRole="button"
             >
-              <LinearGradient
-                colors={canProceed() ? ['#29202b', '#8B5CF6', '#A855F7'] : ['#333333', '#333333']}
-                style={styles.nextButtonGradient}
-              >
-                <Text style={[
-                  styles.nextButtonText,
-                  !canProceed() && styles.nextButtonTextDisabled,
-                ]}>
-                  {currentQuestionIndex === questions.length - 1 ? 'Generate Roadmap' : 'Next'}
-                </Text>
-                <ChevronRight 
-                  size={20} 
-                  color={canProceed() ? '#FFFFFF' : '#666666'} 
+              <View style={styles.questionHeader}>
+                <View style={styles.iconContainer}>
+                  <Target size={32} color="#00E6E6" />
+                </View>
+                <Text style={styles.questionTitle}>{currentQuestion.title}</Text>
+                <Text style={styles.questionSubtitle}>{currentQuestion.subtitle}</Text>
+              </View>
+
+              <View style={styles.inputContainer}>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder={currentQuestion.placeholder}
+                  placeholderTextColor="#666666"
+                  value={answer}
+                  onChangeText={setAnswer}
+                  multiline
+                  numberOfLines={4}
+                  textAlignVertical="top"
+                  returnKeyType="done"
+                  blurOnSubmit={true}
+                  accessibilityLabel={`Answer for: ${currentQuestion.title}`}
+                  accessibilityHint="Enter your answer to this question"
+                  maxLength={1000}
+                  {...Platform.select({
+                    android: {
+                      underlineColorAndroid: 'transparent',
+                      autoCorrect: false,
+                      autoCapitalize: 'sentences',
+                    },
+                  })}
                 />
-              </LinearGradient>
-            </TouchableOpacity>
-          </View>
+              </View>
+            </Animated.View>
+
+            <View style={styles.footer}>
+              <TouchableOpacity
+                style={[
+                  styles.nextButton,
+                  !canProceed() && styles.nextButtonDisabled,
+                ]}
+                onPress={handleNext}
+                disabled={!canProceed()}
+                accessibilityLabel={currentQuestionIndex === questions.length - 1 ? 'Generate Roadmap' : 'Next Question'}
+                accessibilityHint={currentQuestionIndex === questions.length - 1 ? 'Generate your personalized roadmap' : 'Go to next question'}
+                accessibilityRole="button"
+              >
+                <LinearGradient
+                  colors={canProceed() ? ['#29202b', '#8B5CF6', '#A855F7'] : ['#333333', '#333333']}
+                  style={styles.nextButtonGradient}
+                >
+                  <Text style={[
+                    styles.nextButtonText,
+                    !canProceed() && styles.nextButtonTextDisabled,
+                  ]}>
+                    {currentQuestionIndex === questions.length - 1 ? 'Generate Roadmap' : 'Next'}
+                  </Text>
+                  <ChevronRight 
+                    size={20} 
+                    color={canProceed() ? '#FFFFFF' : '#666666'} 
+                  />
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
         </SafeAreaView>
       </LinearGradient>
     </TouchableWithoutFeedback>
@@ -241,6 +247,9 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     paddingHorizontal: 24,
+  },
+  keyboardAvoiding: {
+    flex: 1,
   },
   header: {
     alignItems: 'center',

@@ -262,7 +262,17 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
           }
         }
       } catch (getUserError) {
-        console.warn('[UnifiedUser] Error fetching user from backend after Google sign-in:', getUserError);
+        const errorMsg = getUserError instanceof Error ? getUserError.message : String(getUserError);
+        console.warn('[UnifiedUser] Error fetching user from backend after Google sign-in:', errorMsg);
+        
+        // If it's a JSON parse error or network error, log it but continue with fallback
+        if (errorMsg.includes('JSON Parse error') || 
+            errorMsg.includes('Unexpected character') ||
+            errorMsg.includes('invalid JSON') ||
+            errorMsg.includes('non-JSON') ||
+            errorMsg.includes('Network request failed')) {
+          console.warn('[UnifiedUser] Backend connectivity issue detected. Will create fallback user.');
+        }
       }
 
       let guestData = null;
@@ -299,15 +309,27 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
           createdUser = true;
           console.log('[UnifiedUser] ✅ Created user from Google sign-in guest data via mutation');
         } catch (createError) {
-          console.warn('[UnifiedUser] user.create mutation failed, attempting direct client fallback:', createError);
-          try {
-            await directClient.user.create.mutate(createPayload);
-            createdUser = true;
-            console.log('[UnifiedUser] ✅ Created user from Google sign-in guest data via direct client fallback');
-          } catch (directCreateError) {
+          const errorMsg = createError instanceof Error ? createError.message : String(createError);
+          console.warn('[UnifiedUser] user.create mutation failed, attempting direct client fallback:', errorMsg);
+          
+          // Check if it's a JSON parse error - if so, skip direct client attempt
+          if (errorMsg.includes('JSON Parse error') || 
+              errorMsg.includes('Unexpected character') ||
+              errorMsg.includes('invalid JSON') ||
+              errorMsg.includes('non-JSON')) {
+            console.warn('[UnifiedUser] Backend returned non-JSON response. Skipping direct client attempt and using fallback user.');
             createdUser = false;
-            console.error('[UnifiedUser] Failed to create user from Google sign-in via direct client:', directCreateError);
-            console.warn('[UnifiedUser] Continuing with local fallback user after Google sign-in failure.');
+          } else {
+            try {
+              await directClient.user.create.mutate(createPayload);
+              createdUser = true;
+              console.log('[UnifiedUser] ✅ Created user from Google sign-in guest data via direct client fallback');
+            } catch (directCreateError) {
+              createdUser = false;
+              const directErrorMsg = directCreateError instanceof Error ? directCreateError.message : String(directCreateError);
+              console.error('[UnifiedUser] Failed to create user from Google sign-in via direct client:', directErrorMsg);
+              console.warn('[UnifiedUser] Continuing with local fallback user after Google sign-in failure.');
+            }
           }
         }
 
@@ -318,7 +340,15 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
               dbUser = newUserResult.user;
             }
           } catch (postCreateError) {
-            console.warn('[UnifiedUser] Unable to fetch user after creation:', postCreateError);
+            const errorMsg = postCreateError instanceof Error ? postCreateError.message : String(postCreateError);
+            console.warn('[UnifiedUser] Unable to fetch user after creation:', errorMsg);
+            // If it's a JSON parse error, we'll continue with fallback user
+            if (errorMsg.includes('JSON Parse error') || 
+                errorMsg.includes('Unexpected character') ||
+                errorMsg.includes('invalid JSON') ||
+                errorMsg.includes('non-JSON')) {
+              console.warn('[UnifiedUser] Backend connectivity issue after user creation. Using fallback user.');
+            }
           }
         }
       }
@@ -413,9 +443,42 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       return true;
     } catch (error) {
       console.error('[UnifiedUser] Google sign-in error:', error);
+      
+      // Handle JSON parse errors specifically
       if (error instanceof Error) {
-        throw new Error(error.message || 'Failed to sign in with Google. Please try again.');
+        const errorMessage = error.message || '';
+        
+        // Check for JSON parse errors
+        if (errorMessage.includes('JSON Parse error') || 
+            errorMessage.includes('Unexpected character') ||
+            errorMessage.includes('invalid JSON') ||
+            errorMessage.includes('non-JSON') ||
+            errorMessage.includes('Server returned non-JSON') ||
+            errorMessage.includes('Server returned invalid JSON')) {
+          console.error('[UnifiedUser] Backend returned non-JSON response. This usually means the backend server is not running or returned an error page.');
+          throw new Error('Unable to connect to the server. Please check your internet connection and try again.');
+        }
+        
+        // Check for network errors
+        if (errorMessage.includes('Network request failed') || 
+            errorMessage.includes('fetch') ||
+            errorMessage.includes('network') ||
+            errorMessage.includes('ECONNREFUSED') ||
+            errorMessage.includes('ERR_NETWORK') ||
+            errorMessage.includes('Failed to fetch')) {
+          throw new Error('Network error. Please check your internet connection and try again.');
+        }
+        
+        // Check for backend connectivity issues
+        if (errorMessage.includes('Backend is running') || 
+            errorMessage.includes('API URL')) {
+          throw new Error('Unable to connect to the server. Please try again later.');
+        }
+        
+        // For other errors, provide a user-friendly message
+        throw new Error(errorMessage || 'Failed to sign in with Google. Please try again.');
       }
+      
       throw new Error('Failed to sign in with Google. Please try again.');
     } finally {
       setIsAuthenticating(false);
@@ -462,59 +525,149 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
                 subscriptionPurchasedAt: dbUser.subscriptionPurchasedAt ? new Date(dbUser.subscriptionPurchasedAt) : null,
               };
               await saveUser(userData);
-              await restoreServerDataToLocal(dbUser);
+              // Restore server data (non-blocking - if it fails, user can still use the app)
+              restoreServerDataToLocal(dbUser).catch((restoreError) => {
+                console.warn('[UnifiedUser] Error restoring server data (non-critical):', restoreError);
+                // Continue anyway - user data is saved, they can use the app
+              });
               console.log('[UnifiedUser] ✅ Restored registered user from Supabase session');
               return; // Exit early since we've set the user
             }
-          } catch (restoreError) {
-            console.error('[UnifiedUser] Error restoring user from Supabase session:', restoreError);
-            // Continue with loading guest user as fallback
+          } catch (restoreError: any) {
+            const errorMsg = restoreError?.message || String(restoreError);
+            console.error('[UnifiedUser] Error restoring user from Supabase session:', errorMsg);
+            
+            // If backend is unavailable but we have a Supabase session, create fallback registered user
+            // This prevents resetting to guest when backend has connectivity issues
+            if (session?.user) {
+              console.warn('[UnifiedUser] ⚠️ Backend unavailable, creating fallback registered user from Supabase session');
+              const fallbackUser: UnifiedUser = {
+                id: session.user.id,
+                email: session.user.email || null,
+                name: session.user.user_metadata?.name || null,
+                username: null,
+                profilePicture: session.user.user_metadata?.picture || null,
+                mode: 'registered',
+                isGuest: false,
+                createdAt: new Date(session.user.created_at || Date.now()),
+                subscriptionPlan: 'free',
+                subscriptionStatus: null,
+                subscriptionExpiresAt: null,
+                subscriptionPurchasedAt: null,
+              };
+              await saveUser(fallbackUser);
+              console.log('[UnifiedUser] ✅ Created fallback registered user from Supabase session');
+              return; // Exit early since we've set the user
+            }
+            
+            // Only continue with guest user if there's no Supabase session
+            // If we have a session, we've already created a fallback registered user above
           }
         }
         
         setUserInternal(parsed);
-      } else {
-        // No stored user - check if we have Supabase session
-        if (session?.user) {
-          console.log('[UnifiedUser] No stored user but Supabase session exists - restoring registered user...');
-          // Try to restore user data from database
-          try {
-            const directClient = createBackendClient();
-            const result = await directClient.user.get.query({ supabaseId: session.user.id });
-            if (result.success && result.user) {
-              const dbUser = result.user;
-              const userData: UnifiedUser = {
-                id: dbUser.id || session.user.id,
-                email: dbUser.email || session.user.email || null,
-                name: dbUser.name || null,
-                username: dbUser.username || null,
-                profilePicture: dbUser.profilePicture || null,
-                mode: 'registered',
-                isGuest: false,
-                createdAt: dbUser.createdAt ? new Date(dbUser.createdAt) : new Date(),
-                subscriptionPlan: (dbUser.subscriptionPlan || 'free') as any,
-                subscriptionStatus: dbUser.subscriptionStatus as any,
-                subscriptionExpiresAt: dbUser.subscriptionExpiresAt ? new Date(dbUser.subscriptionExpiresAt) : null,
-                subscriptionPurchasedAt: dbUser.subscriptionPurchasedAt ? new Date(dbUser.subscriptionPurchasedAt) : null,
-              };
+        } else {
+          // No stored user - check if we have Supabase session
+          if (session?.user) {
+            console.log('[UnifiedUser] No stored user but Supabase session exists - restoring registered user...');
+            // Try to restore user data from database
+            try {
+              const directClient = createBackendClient();
+              const result = await directClient.user.get.query({ supabaseId: session.user.id });
+              if (result.success && result.user) {
+                const dbUser = result.user;
+                const userData: UnifiedUser = {
+                  id: dbUser.id || session.user.id,
+                  email: dbUser.email || session.user.email || null,
+                  name: dbUser.name || null,
+                  username: dbUser.username || null,
+                  profilePicture: dbUser.profilePicture || null,
+                  mode: 'registered',
+                  isGuest: false,
+                  createdAt: dbUser.createdAt ? new Date(dbUser.createdAt) : new Date(),
+                  subscriptionPlan: (dbUser.subscriptionPlan || 'free') as any,
+                  subscriptionStatus: dbUser.subscriptionStatus as any,
+                  subscriptionExpiresAt: dbUser.subscriptionExpiresAt ? new Date(dbUser.subscriptionExpiresAt) : null,
+                  subscriptionPurchasedAt: dbUser.subscriptionPurchasedAt ? new Date(dbUser.subscriptionPurchasedAt) : null,
+                };
               await saveUser(userData);
-              await restoreServerDataToLocal(dbUser);
+              // Restore server data (non-blocking - if it fails, user can still use the app)
+              restoreServerDataToLocal(dbUser).catch((restoreError) => {
+                console.warn('[UnifiedUser] Error restoring server data (non-critical):', restoreError);
+                // Continue anyway - user data is saved, they can use the app
+              });
               console.log('[UnifiedUser] ✅ Restored registered user from Supabase session (no stored user)');
               return; // Exit early since we've set the user
+              }
+            } catch (restoreError: any) {
+              const errorMsg = restoreError?.message || String(restoreError);
+              console.error('[UnifiedUser] Error restoring user from Supabase session:', errorMsg);
+              
+              // If there's a Supabase session, create a fallback registered user instead of guest
+              // This prevents resetting the user when backend is unavailable
+              if (session?.user) {
+                console.warn('[UnifiedUser] ⚠️ Backend unavailable, creating fallback registered user from Supabase session');
+                const fallbackUser: UnifiedUser = {
+                  id: session.user.id,
+                  email: session.user.email || null,
+                  name: session.user.user_metadata?.name || null,
+                  username: null,
+                  profilePicture: session.user.user_metadata?.picture || null,
+                  mode: 'registered',
+                  isGuest: false,
+                  createdAt: new Date(session.user.created_at || Date.now()),
+                  subscriptionPlan: 'free',
+                  subscriptionStatus: null,
+                  subscriptionExpiresAt: null,
+                  subscriptionPurchasedAt: null,
+                };
+                await saveUser(fallbackUser);
+                console.log('[UnifiedUser] ✅ Created fallback registered user from Supabase session');
+                return; // Exit early since we've set the user
+              }
+              
+              // Only create guest user if there's no Supabase session
+              await createGuestUser();
             }
-          } catch (restoreError) {
-            console.error('[UnifiedUser] Error restoring user from Supabase session:', restoreError);
-            // Create guest user as fallback
+          } else {
+            // No session, no stored user - create guest user
             await createGuestUser();
           }
-        } else {
-          // No session, no stored user - create guest user
-          await createGuestUser();
         }
-      }
     } catch (error) {
       console.error('[UnifiedUser] Error loading user:', error);
-      await createGuestUser();
+      
+      // Before creating guest user, check if we have a Supabase session
+      // If we do, create a fallback registered user instead
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          console.warn('[UnifiedUser] ⚠️ Error loading user but Supabase session exists - creating fallback registered user');
+          const fallbackUser: UnifiedUser = {
+            id: session.user.id,
+            email: session.user.email || null,
+            name: session.user.user_metadata?.name || null,
+            username: null,
+            profilePicture: session.user.user_metadata?.picture || null,
+            mode: 'registered',
+            isGuest: false,
+            createdAt: new Date(session.user.created_at || Date.now()),
+            subscriptionPlan: 'free',
+            subscriptionStatus: null,
+            subscriptionExpiresAt: null,
+            subscriptionPurchasedAt: null,
+          };
+          await saveUser(fallbackUser);
+          console.log('[UnifiedUser] ✅ Created fallback registered user from Supabase session (error handler)');
+        } else {
+          // No Supabase session - create guest user
+          await createGuestUser();
+        }
+      } catch (sessionError) {
+        console.error('[UnifiedUser] Error checking Supabase session in error handler:', sessionError);
+        // If we can't check session, create guest user as last resort
+        await createGuestUser();
+      }
     } finally {
       setIsHydrated(true);
     }
@@ -675,17 +828,25 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         console.log('[UnifiedUser] Preserving local streak data (server has none)');
       }
       
-      // Handle task timers intelligently: preserve active local timers
-      if (hasActiveLocalTimer && localTaskTimers.length > 0) {
-        // Merge local active timers with server timers
-        let serverTaskTimers: any[] = [];
-        if (dbUser.taskTimers) {
-          try {
-            serverTaskTimers = JSON.parse(dbUser.taskTimers);
-          } catch (e) {
-            console.warn('[UnifiedUser] Failed to parse server task timers:', e);
+        // Handle task timers intelligently: preserve active local timers
+        if (hasActiveLocalTimer && localTaskTimers.length > 0) {
+          // Merge local active timers with server timers
+          let serverTaskTimers: any[] = [];
+          if (dbUser.taskTimers) {
+            try {
+              serverTaskTimers = JSON.parse(dbUser.taskTimers);
+            } catch (e: any) {
+              const parseError = e?.message || String(e);
+              console.warn('[UnifiedUser] Failed to parse server task timers:', parseError);
+              // If it's a JSON parse error, log it but continue with empty array
+              if (parseError.includes('JSON Parse error') || 
+                  parseError.includes('Unexpected character') ||
+                  parseError.includes('invalid JSON')) {
+                console.warn('[UnifiedUser] Server task timers data is corrupted, using empty array');
+                serverTaskTimers = [];
+              }
+            }
           }
-        }
         
         // Keep active local timers, merge with server timers (avoid duplicates)
         const activeLocalTimers = localTaskTimers.filter((timer: any) => {
@@ -1160,11 +1321,23 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
                 throw new Error('Failed to create user in database');
               }
             } catch (createError: any) {
+              const errorMsg = createError?.message || String(createError);
               console.error('[UnifiedUser] ❌ Database creation error:', {
-                message: createError?.message,
+                message: errorMsg,
                 error: createError,
                 stack: createError?.stack,
               });
+              
+              // Check if it's a JSON parse error or network error
+              if (errorMsg.includes('JSON Parse error') || 
+                  errorMsg.includes('Unexpected character') ||
+                  errorMsg.includes('invalid JSON') ||
+                  errorMsg.includes('non-JSON') ||
+                  errorMsg.includes('Network request failed') ||
+                  errorMsg.includes('Failed to fetch')) {
+                console.warn('[UnifiedUser] ⚠️ Backend connectivity issue during user creation. Continuing with Supabase auth only.');
+              }
+              
               // Don't throw - allow sign-in to continue with Supabase auth only
               // User can still use the app, data will sync when backend is available
               console.warn('[UnifiedUser] ⚠️ Continuing sign-in without database user (backend may be unavailable)');
@@ -1172,11 +1345,30 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
           }
         }
       } catch (getUserError: any) {
+        const errorMsg = getUserError?.message || String(getUserError);
         console.error('[UnifiedUser] ❌ Error fetching user from database:', {
-          message: getUserError?.message,
+          message: errorMsg,
           error: getUserError,
           stack: getUserError?.stack,
         });
+        
+        // Check if it's a JSON parse error or network error
+        const isJsonParseError = errorMsg.includes('JSON Parse error') || 
+            errorMsg.includes('Unexpected character') ||
+            errorMsg.includes('invalid JSON') ||
+            errorMsg.includes('non-JSON') ||
+            errorMsg.includes('Server returned non-JSON') ||
+            errorMsg.includes('Server returned invalid JSON');
+        const isNetworkError = errorMsg.includes('Network request failed') ||
+            errorMsg.includes('Failed to fetch') ||
+            errorMsg.includes('ECONNREFUSED') ||
+            errorMsg.includes('ERR_NETWORK');
+        
+        if (isJsonParseError || isNetworkError) {
+          console.warn('[UnifiedUser] ⚠️ Backend connectivity issue detected. Continuing sign-in with Supabase auth only.');
+          console.warn('[UnifiedUser] ⚠️ Error type:', isJsonParseError ? 'JSON Parse Error' : 'Network Error');
+        }
+        
         // Don't throw - allow sign-in to continue with Supabase auth only
         // User can still use the app, data will sync when backend is available
         console.warn('[UnifiedUser] ⚠️ Continuing sign-in without database user (backend may be unavailable)');
@@ -1290,25 +1482,41 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       console.error('[UnifiedUser] Sign in error:', error);
       // Provide more helpful error messages
       if (error instanceof Error) {
+        const errorMessage = error.message || '';
+        
+        // Check for JSON parse errors first
+        if (errorMessage.includes('JSON Parse error') || 
+            errorMessage.includes('Unexpected character') ||
+            errorMessage.includes('invalid JSON') ||
+            errorMessage.includes('non-JSON') ||
+            errorMessage.includes('Server returned non-JSON') ||
+            errorMessage.includes('Server returned invalid JSON')) {
+          console.error('[UnifiedUser] Backend returned non-JSON response. This usually means the backend server is not running or returned an error page.');
+          throw new Error('Unable to connect to the server. Please check your internet connection and try again.');
+        }
+        
         // Supabase error messages
-        if (error.message.includes('Email not confirmed')) {
+        if (errorMessage.includes('Email not confirmed')) {
           throw new Error('Please confirm your email address before signing in. Check your inbox for the verification link.');
-        } else if (error.message.includes('Invalid login credentials') || 
-            error.message.includes('Invalid credentials') ||
-            error.message.includes('email or password') ||
-            error.message.includes('Wrong email or password')) {
+        } else if (errorMessage.includes('Invalid login credentials') || 
+            errorMessage.includes('Invalid credentials') ||
+            errorMessage.includes('email or password') ||
+            errorMessage.includes('Wrong email or password')) {
           throw new Error('Invalid email or password. Please check your credentials and try again.');
-        } else if (error.message.includes('User data not found') || 
-                   error.message.includes('not found in database')) {
+        } else if (errorMessage.includes('User data not found') || 
+                   errorMessage.includes('not found in database')) {
           throw new Error('Account not found. Please sign up first.');
-        } else if (error.message.includes('Network') || 
-                   error.message.includes('fetch') || 
-                   error.message.includes('Failed to fetch') ||
-                   error.message.includes('ECONNREFUSED')) {
+        } else if (errorMessage.includes('Network') || 
+                   errorMessage.includes('fetch') || 
+                   errorMessage.includes('Failed to fetch') ||
+                   errorMessage.includes('ECONNREFUSED')) {
           throw new Error('Network error. Please check your connection and try again.');
+        } else if (errorMessage.includes('Backend is running') || 
+                   errorMessage.includes('API URL')) {
+          throw new Error('Unable to connect to the server. Please try again later.');
         } else {
           // Use the original error message if it exists, otherwise provide a generic one
-          throw new Error(error.message || 'Failed to sign in. Please try again.');
+          throw new Error(errorMessage || 'Failed to sign in. Please try again.');
         }
       } else {
         // If error is not an Error instance, create one with a message

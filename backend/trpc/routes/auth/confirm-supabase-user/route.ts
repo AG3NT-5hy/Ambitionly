@@ -3,6 +3,7 @@ import { publicProcedure } from '../../../create-context';
 import { supabaseAdmin } from '../../../../lib/supabase';
 import { emailStorageService } from '../../../../../lib/email-storage';
 import { db } from '../../../../../lib/database';
+import * as bcrypt from 'bcryptjs';
 
 const confirmSupabaseUserSchema = z.object({
   email: z.string().email(),
@@ -42,7 +43,7 @@ export const confirmSupabaseUserProcedure = publicProcedure
         if (supabaseError.message?.includes('already registered') || 
             supabaseError.message?.includes('already exists') ||
             supabaseError.message?.includes('User already registered')) {
-          console.log('[Auth.ConfirmSupabaseUser] User already exists, attempting to get and confirm...');
+          console.log('[Auth.ConfirmSupabaseUser] User already exists in Supabase, attempting to get and confirm...');
           
           // Try to get user by email (this requires listing users, but it's a fallback)
           try {
@@ -65,12 +66,38 @@ export const confirmSupabaseUserProcedure = publicProcedure
                   }
                 }
                 
-                // Collect email for login (user already exists)
-                try {
-                  const dbUser = await db.user.findUnique({
-                    where: { email: input.email },
-                  });
+                // Check if user exists in database - if not, create a record
+                let dbUser = await db.user.findUnique({
+                  where: { email: input.email },
+                });
 
+                if (!dbUser) {
+                  // User exists in Supabase but not in database - create database record
+                  console.log('[Auth.ConfirmSupabaseUser] User exists in Supabase but not in database, creating database record...');
+                  try {
+                    const hashedPassword = await bcrypt.hash(input.password, 10);
+                    
+                    dbUser = await db.user.create({
+                      data: {
+                        email: input.email,
+                        password: hashedPassword,
+                        supabaseId: existingUser.id,
+                      },
+                    });
+                    console.log('[Auth.ConfirmSupabaseUser] ✅ Created database record for existing Supabase user');
+                  } catch (createError: any) {
+                    console.error('[Auth.ConfirmSupabaseUser] Error creating database record:', createError);
+                    // If it's a duplicate key error, try to fetch the user again (race condition)
+                    if (createError.code === 'P2002') {
+                      dbUser = await db.user.findUnique({
+                        where: { email: input.email },
+                      });
+                    }
+                  }
+                }
+                
+                // Collect email for login/signup
+                try {
                   if (dbUser) {
                     await emailStorageService.addEmail(input.email, dbUser.id, 'login').catch(error => {
                       console.warn('[Auth.ConfirmSupabaseUser] Failed to store email:', error);

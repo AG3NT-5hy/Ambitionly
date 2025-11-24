@@ -150,14 +150,28 @@ export default function SplashScreen() {
         
         // Check if user is registered (not guest) by checking Supabase session
         let isRegisteredUser = !isGuestUser;
+        let session = null;
         if (isGuestUser) {
           // Double-check by looking at Supabase session
           try {
             const { supabase } = await import('../lib/supabase');
-            const { data: { session } } = await supabase.auth.getSession();
+            const { data: { session: supabaseSession } } = await supabase.auth.getSession();
+            session = supabaseSession;
             if (session?.user) {
               console.log('[Splash] Supabase session found, user is registered');
               isRegisteredUser = true;
+            }
+          } catch (e) {
+            console.warn('[Splash] Error checking Supabase session:', e);
+          }
+        } else {
+          // If not a guest, also check Supabase session to be sure
+          try {
+            const { supabase } = await import('../lib/supabase');
+            const { data: { session: supabaseSession } } = await supabase.auth.getSession();
+            session = supabaseSession;
+            if (session?.user) {
+              console.log('[Splash] Confirmed registered user with Supabase session');
             }
           } catch (e) {
             console.warn('[Splash] Error checking Supabase session:', e);
@@ -176,8 +190,19 @@ export default function SplashScreen() {
           // For guests or users without roadmaps, always go to welcome
           if (isRegisteredUser) {
             console.log('[Splash] Registered user with no roadmap, navigating to welcome (staying logged in)');
+            console.log('[Splash] User data:', {
+              hasGoal: !!storedGoal,
+              hasRoadmap: !!parsedRoadmap,
+              goalLength: storedGoal?.length || 0,
+              roadmapPhases: parsedRoadmap?.phases?.length || 0,
+            });
           } else {
             console.log('[Splash] No existing goal in storage or guest user, navigating to welcome');
+            console.log('[Splash] User status:', {
+              isGuestUser,
+              isRegisteredUser,
+              hasSupabaseSession: !!session?.user,
+            });
           }
           hasNavigatedRef.current = true;
           router.replace('/welcome');
