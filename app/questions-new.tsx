@@ -167,48 +167,48 @@ export default function QuestionsScreen() {
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
             >
-              <Animated.View
-                style={[
-                  styles.content,
-                  {
-                    opacity: fadeAnim,
-                    transform: [{ translateY: slideAnim }],
-                  },
-                ]}
-              >
-                <View style={styles.questionHeader}>
-                  <View style={styles.iconContainer}>
-                    <Target size={32} color="#00E6E6" />
-                  </View>
-                  <Text style={styles.questionTitle}>{currentQuestion.title}</Text>
-                  <Text style={styles.questionSubtitle}>{currentQuestion.subtitle}</Text>
+            <Animated.View
+              style={[
+                styles.content,
+                {
+                  opacity: fadeAnim,
+                  transform: [{ translateY: slideAnim }],
+                },
+              ]}
+            >
+              <View style={styles.questionHeader}>
+                <View style={styles.iconContainer}>
+                  <Target size={32} color="#00E6E6" />
                 </View>
+                <Text style={styles.questionTitle}>{currentQuestion.title}</Text>
+                <Text style={styles.questionSubtitle}>{currentQuestion.subtitle}</Text>
+              </View>
 
-                <View style={styles.inputContainer}>
-                  <TextInput
-                    style={styles.textInput}
-                    placeholder={currentQuestion.placeholder}
-                    placeholderTextColor="#666666"
-                    value={answer}
-                    onChangeText={setAnswer}
-                    multiline
-                    numberOfLines={4}
-                    textAlignVertical="top"
-                    returnKeyType="done"
-                    blurOnSubmit={true}
-                    accessibilityLabel={`Answer for: ${currentQuestion.title}`}
-                    accessibilityHint="Enter your answer to this question"
-                    maxLength={1000}
-                    {...Platform.select({
-                      android: {
-                        underlineColorAndroid: 'transparent',
-                        autoCorrect: false,
-                        autoCapitalize: 'sentences',
-                      },
-                    })}
-                  />
-                </View>
-              </Animated.View>
+              <View style={styles.inputContainer}>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder={currentQuestion.placeholder}
+                  placeholderTextColor="#666666"
+                  value={answer}
+                  onChangeText={setAnswer}
+                  multiline
+                  numberOfLines={4}
+                  textAlignVertical="top"
+                  returnKeyType="done"
+                  blurOnSubmit={true}
+                  accessibilityLabel={`Answer for: ${currentQuestion.title}`}
+                  accessibilityHint="Enter your answer to this question"
+                  maxLength={1000}
+                  {...Platform.select({
+                    android: {
+                      underlineColorAndroid: 'transparent',
+                      autoCorrect: false,
+                      autoCapitalize: 'sentences',
+                    },
+                  })}
+                />
+              </View>
+            </Animated.View>
             </ScrollView>
 
             <View style={styles.footer}>

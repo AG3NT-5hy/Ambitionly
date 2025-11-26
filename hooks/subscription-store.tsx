@@ -159,7 +159,7 @@ export const [SubscriptionProvider, useSubscription] = createContextHook(() => {
         // Only sync with RevenueCat if app is active (prevents hangs on resume)
         const { AppState } = require('react-native');
         if (AppState.currentState === 'active') {
-          // Sync with RevenueCat to ensure we have the latest subscription status
+        // Sync with RevenueCat to ensure we have the latest subscription status
           // Add timeout to prevent hanging
           const syncPromise = syncRevenueCatStatus();
           const timeoutPromise = new Promise((_, reject) => 
