@@ -79,11 +79,52 @@ export const [SubscriptionProvider, useSubscription] = createContextHook(() => {
     }
   }, []);
 
+  // Listen for sign-out events to clear subscription
+  useEffect(() => {
+    const { DeviceEventEmitter } = require('react-native');
+    
+    const handleClearSubscription = async () => {
+      console.log('[Subscription] Sign-out detected, clearing subscription state');
+      // Clear subscription state - subscription is tied to account, not device
+      setSubscriptionStateInternal({ plan: 'free', isActive: false });
+      await AsyncStorage.removeItem(STORAGE_KEYS.SUBSCRIPTION_STATE);
+      console.log('[Subscription] ✅ Subscription state cleared on sign-out');
+    };
+    
+    const handleRestoreSubscription = (subscriptionData: any) => {
+      console.log('[Subscription] Restoring subscription from database:', subscriptionData);
+      if (subscriptionData && subscriptionData.plan) {
+        setSubscriptionStateInternal({
+          plan: subscriptionData.plan,
+          isActive: subscriptionData.isActive || false,
+          expiresAt: subscriptionData.expiresAt ? new Date(subscriptionData.expiresAt) : undefined,
+          purchasedAt: subscriptionData.purchasedAt ? new Date(subscriptionData.purchasedAt) : undefined,
+        });
+        console.log('[Subscription] ✅ Subscription restored from database');
+      }
+    };
+    
+    const clearSubscription = DeviceEventEmitter.addListener('subscription-clear', handleClearSubscription);
+    const restoreSubscription = DeviceEventEmitter.addListener('subscription-restore', handleRestoreSubscription);
+    
+    return () => {
+      clearSubscription.remove();
+      restoreSubscription.remove();
+    };
+  }, []);
+
   // Load subscription state from storage on init and sync with RevenueCat
   useEffect(() => {
     let isMounted = true;
+    let hasLoaded = false;
     
     const loadData = async () => {
+      // Prevent re-hydration when app resumes
+      if (hasLoaded) {
+        console.log('[Subscription] Already loaded, skipping re-hydration');
+        return;
+      }
+
       try {
         const stored = await AsyncStorage.getItem(STORAGE_KEYS.SUBSCRIPTION_STATE);
         
@@ -115,13 +156,31 @@ export const [SubscriptionProvider, useSubscription] = createContextHook(() => {
           }
         }
         
-        // Sync with RevenueCat to ensure we have the latest subscription status
-        await syncRevenueCatStatus();
+        // Only sync with RevenueCat if app is active (prevents hangs on resume)
+        const { AppState } = require('react-native');
+        if (AppState.currentState === 'active') {
+          // Sync with RevenueCat to ensure we have the latest subscription status
+          // Add timeout to prevent hanging
+          const syncPromise = syncRevenueCatStatus();
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('RevenueCat sync timeout')), 5000)
+          );
+          try {
+            await Promise.race([syncPromise, timeoutPromise]);
+          } catch (error) {
+            console.warn('[Subscription] RevenueCat sync failed or timed out:', error);
+            // Continue anyway - we have stored state
+          }
+        } else {
+          console.log('[Subscription] App not active, skipping RevenueCat sync');
+        }
         
+        hasLoaded = true;
         setIsHydrated(true);
       } catch (error) {
         console.error('Error loading subscription state:', error);
         if (isMounted) {
+          hasLoaded = true;
           setIsHydrated(true);
         }
       }

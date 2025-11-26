@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated, ScrollView, Platform, Modal, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Animated, ScrollView, Platform, Modal, ActivityIndicator, BackHandler } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Target, Flame, ChevronRight, Play, Clock, Lock } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -8,7 +8,7 @@ import { useSubscription } from '@/hooks/subscription-store';
 import { useUnifiedUser } from '@/lib/unified-user-store';
 import { useUi } from '@/providers/UiProvider';
 import { SkeletonBlock } from '@/components/Skeleton';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import PaywallScreen from '@/components/PaywallScreen';
 import SignUpScreen from '@/components/SignUpScreen';
 
@@ -53,6 +53,7 @@ export default function RoadmapScreen() {
   const shouldShowSignUp = !isRegistered;
   const [hasCheckedSignUp, setHasCheckedSignUp] = useState<boolean>(false);
   const [startingTimer, setStartingTimer] = useState<string | null>(null);
+  const lastBackPressRef = useRef<number>(0);
   
   // Track the current task to prevent unexpected changes
   const currentTaskRef = useRef<Task | null>(null);
@@ -149,6 +150,41 @@ export default function RoadmapScreen() {
       setShowPaywallModal(true);
     }
   }, [shouldShowPaywallNow, paywallDismissed, showSignUpModal]);
+
+  // Prevent navigating back to onboarding/history from the roadmap screen on Android
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== 'android') {
+        return () => {};
+      }
+
+      const onBackPress = () => {
+        // Close any open modal first
+        if (showPaywallModal) {
+          setShowPaywallModal(false);
+          return true;
+        }
+
+        if (showSignUpModal) {
+          setShowSignUpModal(false);
+          return true;
+        }
+
+        const now = Date.now();
+        if (now - lastBackPressRef.current < 2000) {
+          BackHandler.exitApp();
+          return true;
+        }
+
+        lastBackPressRef.current = now;
+        showToast('Press back again to exit', 'info');
+        return true; // Block default behavior (going back to onboarding)
+      };
+
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => subscription.remove();
+    }, [showPaywallModal, showSignUpModal, showToast])
+  );
 
 
 

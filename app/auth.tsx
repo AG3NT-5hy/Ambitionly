@@ -254,11 +254,16 @@ export default function AuthScreen() {
       const success = await signInWithGoogle();
       clearTimeout(timeoutId);
       
+      if (!success) {
+        setIsLoadingGoogle(false);
+        setError('Failed to sign in with Google. Please try again.');
+        return;
+      }
+      
       if (success) {
-        // Wait for unified user store to save user data to AsyncStorage
-        // Check AsyncStorage directly since React state updates are async
+        // Optimized: Check for user data with fewer attempts and shorter intervals
         let userSaved = false;
-        for (let attempt = 0; attempt < 10; attempt++) {
+        for (let attempt = 0; attempt < 6; attempt++) {
           const storedUser = await AsyncStorage.getItem(STORAGE_KEYS.USER);
           if (storedUser) {
             try {
@@ -273,8 +278,8 @@ export default function AuthScreen() {
             }
           }
           
-          if (attempt < 9) {
-            await new Promise(resolve => setTimeout(resolve, 300));
+          if (attempt < 5) {
+            await new Promise(resolve => setTimeout(resolve, 200)); // Reduced from 300ms
           }
         }
         
@@ -282,17 +287,15 @@ export default function AuthScreen() {
           console.warn('[Auth] User data not saved after Google sign in, but continuing anyway');
         }
         
-        // Wait longer for data to be restored from server and ambition store to reload
-        // restoreServerDataToLocal writes to AsyncStorage, then triggers reload with 300ms delay
-        // We need to wait for both the write and the reload to complete
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        // Reduced wait time - data restoration happens in background
+        await new Promise(resolve => setTimeout(resolve, 800)); // Reduced from 1500ms
         
-        // Check if user has roadmap
+        // Optimized: Check for roadmap with fewer attempts
         let storedGoal: string | null = null;
         let storedRoadmap: string | null = null;
         let hasRoadmap = false;
         
-        for (let attempt = 0; attempt < 5; attempt++) {
+        for (let attempt = 0; attempt < 3; attempt++) {
           storedGoal = await AsyncStorage.getItem(STORAGE_KEYS.GOAL);
           storedRoadmap = await AsyncStorage.getItem(STORAGE_KEYS.ROADMAP);
           hasRoadmap = !!(storedGoal && storedRoadmap);
@@ -302,12 +305,13 @@ export default function AuthScreen() {
             break;
           }
           
-          if (attempt < 4) {
-            await new Promise(resolve => setTimeout(resolve, 500));
+          if (attempt < 2) {
+            await new Promise(resolve => setTimeout(resolve, 300)); // Reduced from 500ms
           }
         }
         
         // Navigate directly to the appropriate screen based on data
+        // If roadmap loads later, user can navigate manually
         if (hasRoadmap) {
           console.log('[Auth] Navigating to roadmap (Google - has roadmap)');
           router.replace('/(main)/roadmap');

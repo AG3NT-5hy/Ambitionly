@@ -44,7 +44,17 @@ export async function signInWithGoogleNative(): Promise<{
       await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
     }
 
-    // Show native Google Sign-In picker
+    // Sign out from Google Sign-In first to clear cached account
+    // This ensures the account picker is always shown
+    try {
+      await GoogleSignin.signOut();
+      console.log('✅ Cleared Google Sign-In cache to show account picker');
+    } catch (signOutError) {
+      // Ignore errors - user might not be signed in, which is fine
+      console.log('Google Sign-In sign out (to show picker):', signOutError);
+    }
+
+    // Show native Google Sign-In picker (will now always show account selection)
     const account = await GoogleSignin.signIn();
     
     // Get the ID token

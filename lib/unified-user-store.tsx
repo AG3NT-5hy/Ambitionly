@@ -5,7 +5,8 @@
 
 import createContextHook from '@nkzw/create-context-hook';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
 import Purchases from 'react-native-purchases';
 import { supabase } from './supabase';
 import { signInWithGoogleNative } from './google-signin-native';
@@ -17,6 +18,27 @@ import { collectGuestData, clearGuestData, backupGuestData } from './user-data-m
 import { STORAGE_KEYS } from '../constants';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 import { config } from '../config';
+
+// Helper to create a fetch with timeout
+const fetchWithTimeout = async (url: string, options: RequestInit, timeoutMs: number = 10000): Promise<Response> => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error(`Request timeout after ${timeoutMs}ms`);
+    }
+    throw error;
+  }
+};
 
 const createBackendClient = () => {
   const baseUrl = config.API_URL;
@@ -30,16 +52,24 @@ const createBackendClient = () => {
         url: trpcUrl,
         fetch: async (url, options) => {
           try {
+            // Check if app is in foreground before making request
+            const appState = AppState.currentState;
+            if (appState !== 'active') {
+              console.warn('[UnifiedUser] App not active, skipping network request');
+              throw new Error('App is not in foreground');
+            }
+            
             console.log('[UnifiedUser] Making request to:', url);
             const startTime = Date.now();
             
-            const response = await fetch(url, {
+            // Use timeout to prevent hanging requests
+            const response = await fetchWithTimeout(url, {
               ...options,
               headers: {
                 ...options?.headers,
                 'Content-Type': 'application/json',
               },
-            });
+            }, 10000); // 10 second timeout
 
             const duration = Date.now() - startTime;
             console.log('[UnifiedUser] Request completed:', {
@@ -104,6 +134,8 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
   const [isHydrated, setIsHydrated] = useState(false);
   const [user, setUserInternal] = useState<UnifiedUser | null>(null);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const hasLoadedRef = useRef(false);
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
 
   // Use tRPC hooks for mutations
   const signupMutation = trpc.auth.signup.useMutation();
@@ -111,18 +143,47 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
   const createUserMutation = trpc.user.create.useMutation();
   const updateUserMutation = trpc.user.update.useMutation();
 
-  // Load user on init
+  // Monitor AppState to prevent operations when app is in background
   useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
+      appStateRef.current = nextAppState;
+      console.log('[UnifiedUser] AppState changed to:', nextAppState);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  // Load user on init (only once)
+  useEffect(() => {
+    // Prevent re-hydration when app resumes from background
+    if (hasLoadedRef.current) {
+      console.log('[UnifiedUser] Already loaded, skipping re-hydration');
+      return;
+    }
+
     // Log API configuration
     console.log('[UnifiedUser] Backend API URL:', config.API_URL);
     console.log('[UnifiedUser] Full tRPC URL:', `${config.API_URL}/api/trpc`);
     
-    // Test backend connectivity (non-blocking)
+    // Test backend connectivity (non-blocking, with timeout)
     const testBackendConnectivity = async () => {
+      // Only test if app is active
+      if (AppState.currentState !== 'active') {
+        console.log('[UnifiedUser] App not active, skipping connectivity test');
+        return;
+      }
+
       try {
         const testClient = createBackendClient();
-        // Try a simple query to test connectivity
-        const testResult = await testClient.user.get.query({ email: 'test@test.com' });
+        // Try a simple query to test connectivity with timeout
+        const testPromise = testClient.user.get.query({ email: 'test@test.com' });
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Connectivity test timeout')), 5000)
+        );
+        
+        await Promise.race([testPromise, timeoutPromise]);
         console.log('[UnifiedUser] Backend connectivity test:', {
           reachable: true,
           responseReceived: true,
@@ -132,7 +193,8 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         const isNetworkError = errorMessage.includes('Network') || 
                               errorMessage.includes('fetch') || 
                               errorMessage.includes('Failed to fetch') ||
-                              errorMessage.includes('ECONNREFUSED');
+                              errorMessage.includes('ECONNREFUSED') ||
+                              errorMessage.includes('timeout');
         
         console.warn('[UnifiedUser] Backend connectivity test:', {
           reachable: false,
@@ -150,10 +212,17 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
     // Test connectivity after a short delay (non-blocking)
     setTimeout(testBackendConnectivity, 1000);
     
+    hasLoadedRef.current = true;
     loadUser();
     
     // Listen for Supabase auth state changes to sync with unified user store
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      // Don't process auth changes if app is in background
+      if (appStateRef.current !== 'active') {
+        console.log('[UnifiedUser] App not active, deferring auth state change');
+        return;
+      }
+
       console.log('[UnifiedUser] Supabase auth state changed:', event);
       
       if (event === 'SIGNED_IN' && session?.user) {
@@ -167,7 +236,9 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
             // The unified user store's signIn should have been called, but if it wasn't,
             // we need to reload user data. For now, reload user after a delay to let signIn complete
             setTimeout(async () => {
-              await loadUser();
+              if (appStateRef.current === 'active') {
+                await loadUser();
+              }
             }, 2000);
           }
         } else {
@@ -353,6 +424,11 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         }
       }
 
+      // Check for local roadmap/goal data BEFORE any operations
+      const localGoal = await AsyncStorage.getItem(STORAGE_KEYS.GOAL);
+      const localRoadmap = await AsyncStorage.getItem(STORAGE_KEYS.ROADMAP);
+      const hasLocalData = !!(localGoal && localRoadmap);
+
       if (dbUser) {
         if (createdUser && !guestData) {
           guestData = await collectGuestData();
@@ -391,11 +467,7 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
           isLifetime: userData.subscriptionPlan === 'lifetime',
         });
 
-        // Then restore server data if user exists in database (only for premium users)
-        // This ensures roadmap and other data is restored
-        await restoreServerDataToLocal(dbUser);
-        
-        // Trigger initial sync for premium users to ensure any local changes are synced to database
+        // Check if user is premium
         const isLifetime = userData.subscriptionPlan === 'lifetime';
         const isMonthlyOrAnnual = userData.subscriptionPlan === 'monthly' || userData.subscriptionPlan === 'annual';
         const hasValidExpiration = !userData.subscriptionExpiresAt || userData.subscriptionExpiresAt > new Date();
@@ -403,7 +475,31 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
                          userData.subscriptionPlan !== 'free' &&
                          userData.subscriptionStatus === 'active' &&
                          (isLifetime || (isMonthlyOrAnnual && hasValidExpiration));
+
+        // Only restore server data if user is premium AND server has data
+        // If server has no data but local has data, preserve local data
+        const serverHasData = !!(dbUser.goal && dbUser.roadmap);
         
+        if (isPremium && serverHasData) {
+          console.log('[UnifiedUser] Premium user with server data - restoring from server');
+          // Restore server data (this will preserve local data if server doesn't have it)
+          await restoreServerDataToLocal(dbUser);
+          // Trigger reload to pick up restored data
+          triggerAmbitionStoreReload();
+        } else if (isPremium && !serverHasData && hasLocalData) {
+          console.log('[UnifiedUser] Premium user but no server data - preserving local data');
+          // Don't restore, keep local data - it will be synced later
+          // Don't clear guest data yet - we want to keep the local roadmap
+          // Trigger reload to ensure ambition store has the data
+          triggerAmbitionStoreReload();
+        } else if (!isPremium && hasLocalData) {
+          console.log('[UnifiedUser] Non-premium user with local data - preserving local data');
+          // Non-premium user with local data - preserve it, don't clear
+          // Trigger reload to ensure ambition store has the data
+          triggerAmbitionStoreReload();
+        }
+        
+        // Trigger initial sync for premium users to ensure any local changes are synced to database
         if (isPremium) {
           console.log('[UnifiedUser] Premium user detected (Google), triggering initial data sync...');
           setTimeout(() => {
@@ -417,6 +513,7 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
           }, 1000);
         }
       } else {
+        // No dbUser - use guest data to create fallback user
         guestData = guestData || await collectGuestData();
         const fallbackUser: UnifiedUser = {
           id: authUser.id,
@@ -433,10 +530,24 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
           subscriptionPurchasedAt: guestData.subscriptionPurchasedAt,
         };
         await saveUser(fallbackUser);
+        
+        // If we have local data, preserve it - don't clear
+        if (hasLocalData) {
+          console.log('[UnifiedUser] No server user but local data exists - preserving local data');
+          // Don't clear guest data - we want to keep the roadmap
+        }
       }
 
-      if (guestData) {
+      // Only clear guest data if we don't have local roadmap/goal data to preserve
+      // OR if we successfully restored from server
+      if (guestData && !hasLocalData) {
+        console.log('[UnifiedUser] No local data to preserve - clearing guest data');
         await clearGuestData();
+      } else if (guestData && hasLocalData) {
+        console.log('[UnifiedUser] Local data exists - preserving it, not clearing guest data');
+        // Don't clear - we want to keep the local roadmap/goal
+        // Trigger reload so ambition store picks up the preserved data
+        triggerAmbitionStoreReload();
       }
 
       console.log('[UnifiedUser] ✅ Google sign-in complete');
@@ -487,6 +598,14 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
 
   const loadUser = async () => {
     try {
+      // Don't load if app is not active (prevents hanging on resume)
+      if (appStateRef.current !== 'active') {
+        console.log('[UnifiedUser] App not active, skipping loadUser');
+        // Still mark as hydrated to prevent blocking
+        setIsHydrated(true);
+        return;
+      }
+
       // First check for Supabase session - if we have one, we should have a registered user
       const { data: { session } } = await supabase.auth.getSession();
       
@@ -506,8 +625,21 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
           // Try to restore user data by calling signIn with the session
           // We'll need to fetch user data from the database
           try {
+            // Check app state before making network request
+            if (appStateRef.current !== 'active') {
+              console.log('[UnifiedUser] App not active, skipping network request');
+              setUserInternal(parsed);
+              setIsHydrated(true);
+              return;
+            }
+
             const directClient = createBackendClient();
-            const result = await directClient.user.get.query({ supabaseId: session.user.id });
+            // Add timeout to prevent hanging
+            const queryPromise = directClient.user.get.query({ supabaseId: session.user.id });
+            const timeoutPromise = new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('User fetch timeout')), 8000)
+            );
+            const result = await Promise.race([queryPromise, timeoutPromise]) as any;
             if (result.success && result.user) {
               const dbUser = result.user;
               const userData: UnifiedUser = {
@@ -566,14 +698,41 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         }
         
         setUserInternal(parsed);
-        } else {
-          // No stored user - check if we have Supabase session
-          if (session?.user) {
+          } else {
+            // No stored user - check if we have Supabase session
+            if (session?.user) {
             console.log('[UnifiedUser] No stored user but Supabase session exists - restoring registered user...');
             // Try to restore user data from database
             try {
+              // Check app state before making network request
+              if (appStateRef.current !== 'active') {
+                console.log('[UnifiedUser] App not active, creating fallback user');
+                const fallbackUser: UnifiedUser = {
+                  id: session.user.id,
+                  email: session.user.email || null,
+                  name: session.user.user_metadata?.name || null,
+                  username: null,
+                  profilePicture: session.user.user_metadata?.picture || null,
+                  mode: 'registered',
+                  isGuest: false,
+                  createdAt: new Date(session.user.created_at || Date.now()),
+                  subscriptionPlan: 'free',
+                  subscriptionStatus: null,
+                  subscriptionExpiresAt: null,
+                  subscriptionPurchasedAt: null,
+                };
+                await saveUser(fallbackUser);
+                setIsHydrated(true);
+                return;
+              }
+
               const directClient = createBackendClient();
-              const result = await directClient.user.get.query({ supabaseId: session.user.id });
+              // Add timeout to prevent hanging
+              const queryPromise = directClient.user.get.query({ supabaseId: session.user.id });
+              const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('User fetch timeout')), 8000)
+              );
+              const result = await Promise.race([queryPromise, timeoutPromise]) as any;
               if (result.success && result.user) {
                 const dbUser = result.user;
                 const userData: UnifiedUser = {
@@ -790,32 +949,40 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       ]);
       
       // Restore goal and roadmap data (use server data if available, otherwise preserve local)
+      // CRITICAL: Always preserve local data if server doesn't have it
       if (dbUser.goal) {
         restorePromises.push(AsyncStorage.setItem(STORAGE_KEYS.GOAL, dbUser.goal));
+        console.log('[UnifiedUser] Restoring goal from server');
       } else if (localGoal) {
-        // Preserve local goal if server doesn't have it
+        // Preserve local goal if server doesn't have it - don't clear it
         console.log('[UnifiedUser] Preserving local goal (server has none)');
+        // Explicitly keep the local goal - don't remove it
       }
       if (dbUser.timeline) {
         restorePromises.push(AsyncStorage.setItem(STORAGE_KEYS.TIMELINE, dbUser.timeline));
+        console.log('[UnifiedUser] Restoring timeline from server');
       } else if (localTimeline) {
         console.log('[UnifiedUser] Preserving local timeline (server has none)');
       }
       if (dbUser.timeCommitment) {
         restorePromises.push(AsyncStorage.setItem(STORAGE_KEYS.TIME_COMMITMENT, dbUser.timeCommitment));
+        console.log('[UnifiedUser] Restoring time commitment from server');
       } else if (localTimeCommitment) {
         console.log('[UnifiedUser] Preserving local time commitment (server has none)');
       }
       if (dbUser.answers) {
         restorePromises.push(AsyncStorage.setItem(STORAGE_KEYS.ANSWERS, dbUser.answers));
+        console.log('[UnifiedUser] Restoring answers from server');
       } else if (localAnswers) {
         console.log('[UnifiedUser] Preserving local answers (server has none)');
       }
       if (dbUser.roadmap) {
         restorePromises.push(AsyncStorage.setItem(STORAGE_KEYS.ROADMAP, dbUser.roadmap));
+        console.log('[UnifiedUser] Restoring roadmap from server');
       } else if (localRoadmap) {
-        // Preserve local roadmap if server doesn't have it
-        console.log('[UnifiedUser] Preserving local roadmap (server has none)');
+        // Preserve local roadmap if server doesn't have it - CRITICAL: don't clear it
+        console.log('[UnifiedUser] Preserving local roadmap (server has none) - keeping local data');
+        // Explicitly keep the local roadmap - don't remove it
       }
       if (dbUser.completedTasks) {
         restorePromises.push(AsyncStorage.setItem(STORAGE_KEYS.COMPLETED_TASKS, dbUser.completedTasks));
@@ -888,6 +1055,33 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         roadmapLength: dbUser.roadmap?.length || 0,
         preservedActiveTimers: hasActiveLocalTimer,
       });
+      
+      // Restore subscription data to subscription store if user has premium
+      if (hasPremium && dbUser.subscriptionPlan) {
+        try {
+          const subscriptionState = {
+            plan: dbUser.subscriptionPlan as 'free' | 'monthly' | 'annual' | 'lifetime',
+            isActive: dbUser.subscriptionStatus === 'active',
+            expiresAt: dbUser.subscriptionExpiresAt ? new Date(dbUser.subscriptionExpiresAt) : undefined,
+            purchasedAt: dbUser.subscriptionPurchasedAt ? new Date(dbUser.subscriptionPurchasedAt) : undefined,
+          };
+          
+          // Save to subscription store's AsyncStorage
+          await AsyncStorage.setItem('ambitionly_subscription_state', JSON.stringify(subscriptionState));
+          
+          // Trigger subscription store reload
+          const { DeviceEventEmitter } = require('react-native');
+          DeviceEventEmitter.emit('subscription-restore', subscriptionState);
+          
+          console.log('[UnifiedUser] ✅ Subscription data restored from database:', {
+            plan: subscriptionState.plan,
+            isActive: subscriptionState.isActive,
+            expiresAt: subscriptionState.expiresAt,
+          });
+        } catch (subError) {
+          console.warn('[UnifiedUser] Failed to restore subscription data:', subError);
+        }
+      }
       
       // Trigger ambition store reload to load the restored data
       triggerAmbitionStoreReload();
@@ -1533,22 +1727,56 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
     try {
       console.log('[UnifiedUser] Signing out...');
       
-      // 1. Clear ALL user data from AsyncStorage FIRST (before Supabase sign out)
+      // 1. Sync data to database BEFORE signing out (if user is premium)
+      // This ensures data is saved to the cloud before clearing local account data
+      try {
+        const currentUser = user;
+        if (currentUser && !currentUser.isGuest) {
+          const isLifetime = currentUser.subscriptionPlan === 'lifetime';
+          const isMonthlyOrAnnual = currentUser.subscriptionPlan === 'monthly' || currentUser.subscriptionPlan === 'annual';
+          const hasValidExpiration = !currentUser.subscriptionExpiresAt || currentUser.subscriptionExpiresAt > new Date();
+          const isPremium = currentUser.subscriptionPlan && 
+                           currentUser.subscriptionPlan !== 'free' &&
+                           currentUser.subscriptionStatus === 'active' &&
+                           (isLifetime || (isMonthlyOrAnnual && hasValidExpiration));
+          
+          if (isPremium && currentUser.email) {
+            console.log('[UnifiedUser] Premium user signing out - syncing data to database first...');
+            try {
+              const { DeviceEventEmitter } = require('react-native');
+              DeviceEventEmitter.emit('ambition-sync-trigger');
+              // Wait a bit for sync to complete
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              console.log('[UnifiedUser] Data sync triggered before sign out');
+            } catch (syncError) {
+              console.warn('[UnifiedUser] Failed to sync data before sign out:', syncError);
+            }
+          }
+        }
+      } catch (syncError) {
+        console.warn('[UnifiedUser] Error syncing before sign out:', syncError);
+      }
+
+      // 2. Clear ONLY user account data from AsyncStorage (NOT roadmap/goal data)
       // This prevents auth-store from restoring state on restart
-      console.log('[UnifiedUser] Clearing all user data from storage...');
+      // CRITICAL: Keep roadmap/goal data so user doesn't lose their progress
+      // CRITICAL: Clear subscription state - it should be tied to account, not device
+      console.log('[UnifiedUser] Clearing user account data from storage (keeping roadmap/goal, clearing subscription)...');
       await Promise.all([
         // Clear unified user data
         AsyncStorage.removeItem(STORAGE_KEYS.USER),
         AsyncStorage.removeItem(STORAGE_KEYS.GUEST_ID),
-        // Clear all ambition/roadmap data
-        AsyncStorage.removeItem(STORAGE_KEYS.GOAL),
-        AsyncStorage.removeItem(STORAGE_KEYS.TIMELINE),
-        AsyncStorage.removeItem(STORAGE_KEYS.TIME_COMMITMENT),
-        AsyncStorage.removeItem(STORAGE_KEYS.ANSWERS),
-        AsyncStorage.removeItem(STORAGE_KEYS.ROADMAP),
-        AsyncStorage.removeItem(STORAGE_KEYS.COMPLETED_TASKS),
-        AsyncStorage.removeItem(STORAGE_KEYS.STREAK_DATA),
-        AsyncStorage.removeItem(STORAGE_KEYS.TASK_TIMERS),
+        // DO NOT clear roadmap/goal data - user should keep their progress
+        // AsyncStorage.removeItem(STORAGE_KEYS.GOAL),
+        // AsyncStorage.removeItem(STORAGE_KEYS.TIMELINE),
+        // AsyncStorage.removeItem(STORAGE_KEYS.TIME_COMMITMENT),
+        // AsyncStorage.removeItem(STORAGE_KEYS.ANSWERS),
+        // AsyncStorage.removeItem(STORAGE_KEYS.ROADMAP),
+        // AsyncStorage.removeItem(STORAGE_KEYS.COMPLETED_TASKS),
+        // AsyncStorage.removeItem(STORAGE_KEYS.STREAK_DATA),
+        // AsyncStorage.removeItem(STORAGE_KEYS.TASK_TIMERS),
+        // Clear subscription state - subscription is tied to account, not device
+        AsyncStorage.removeItem('ambitionly_subscription_state'),
         // Clear auth tokens from auth-store
         AsyncStorage.removeItem('ambitionly_auth_token'),
         AsyncStorage.removeItem('ambitionly_user_email'),
@@ -1557,10 +1785,10 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         AsyncStorage.removeItem('ambitionly_user'),
       ]);
       
-      // 2. Reset internal state immediately
+      // 3. Reset internal state immediately
       setUserInternal(null);
       
-      // 3. Sign out from Supabase multiple times to ensure session is fully cleared
+      // 4. Sign out from Supabase multiple times to ensure session is fully cleared
       // Supabase stores sessions in SecureStore, so we need to be thorough
       let attempts = 0;
       const maxAttempts = 3;
@@ -1615,7 +1843,7 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         console.error('[UnifiedUser] ⚠️ WARNING: Supabase session still exists after all sign out attempts');
       }
       
-      // 4. Logout from RevenueCat
+      // 5. Logout from RevenueCat
       try {
         await Purchases.logOut();
         console.log('[UnifiedUser] RevenueCat logged out');
@@ -1623,7 +1851,7 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         console.warn('[UnifiedUser] RevenueCat logout failed:', rcError);
       }
       
-      // 5. Create fresh guest user with new ID
+      // 6. Create fresh guest user with new ID
       const newGuestId = generateGuestId();
       await AsyncStorage.setItem(STORAGE_KEYS.GUEST_ID, newGuestId);
       
@@ -1645,16 +1873,21 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       setUserInternal(guestUser);
       await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(guestUser));
       
-      // 6. Clear ambition store in-memory state
-      const { DeviceEventEmitter } = require('react-native');
-      DeviceEventEmitter.emit('ambition-clear-all');
-      console.log('[UnifiedUser] Emitted ambition-clear-all event');
+      // 7. DO NOT clear ambition store in-memory state - keep roadmap/goal data
+      // The user should keep their roadmap when signing out
+      // DeviceEventEmitter.emit('ambition-clear-all'); // REMOVED - don't clear roadmap
+      console.log('[UnifiedUser] Keeping roadmap/goal data - not clearing ambition store');
       
-      // 7. Emit sign-out event to reset navigation state in splash screen
+      // 8. Clear subscription store state - subscription is tied to account
+      const { DeviceEventEmitter } = require('react-native');
+      DeviceEventEmitter.emit('subscription-clear');
+      console.log('[UnifiedUser] Emitted subscription-clear event');
+      
+      // 9. Emit sign-out event to reset navigation state in splash screen
       DeviceEventEmitter.emit('user-signed-out');
       console.log('[UnifiedUser] Emitted user-signed-out event');
       
-      // 8. Wait a bit more to ensure all state is cleared before navigation
+      // 9. Wait a bit more to ensure all state is cleared before navigation
       await new Promise(resolve => setTimeout(resolve, 500));
       
       console.log('[UnifiedUser] ✅ Signed out, fresh guest session created');
@@ -1719,7 +1952,21 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
     
     await saveUser(updatedUser);
     
-    // Sync to database if registered
+    // Also update subscription store's AsyncStorage to keep it in sync
+    try {
+      const subscriptionState = {
+        plan: subscriptionData.plan,
+        isActive: subscriptionData.status === 'active',
+        expiresAt: subscriptionData.expiresAt || undefined,
+        purchasedAt: subscriptionData.purchasedAt || undefined,
+      };
+      await AsyncStorage.setItem('ambitionly_subscription_state', JSON.stringify(subscriptionState));
+      console.log('[UnifiedUser] ✅ Subscription store updated');
+    } catch (subError) {
+      console.warn('[UnifiedUser] Failed to update subscription store:', subError);
+    }
+    
+    // Sync to database if registered (always sync subscription data)
     if (!user.isGuest) {
       await syncToDatabase(updatedUser);
     }
@@ -1749,32 +1996,35 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       return;
     }
     
-    // Check if user has premium subscription
+    // Check if user has premium subscription (for roadmap data sync)
     const hasPremium = userData.subscriptionPlan && 
                       userData.subscriptionPlan !== 'free' &&
                       userData.subscriptionStatus === 'active' &&
                       (!userData.subscriptionExpiresAt || userData.subscriptionExpiresAt > new Date());
     
-    if (!hasPremium) {
-      console.log('[UnifiedUser] User does not have premium subscription, skipping cloud sync');
-      return;
-    }
-    
+    // CRITICAL: Always sync subscription data to database, regardless of premium status
+    // This ensures subscription status is tied to account, not device
     try {
-      console.log('[UnifiedUser] Syncing to database (premium user):', userData.email);
+      console.log('[UnifiedUser] Syncing subscription data to database:', {
+        email: userData.email,
+        plan: userData.subscriptionPlan,
+        status: userData.subscriptionStatus,
+        hasPremium,
+      });
       
       await updateUserMutation.mutateAsync({
         email: userData.email!,
         name: userData.name || undefined,
         username: userData.username || undefined,
         profilePicture: userData.profilePicture || undefined,
+        // Always sync subscription data - this is account-level data
         subscriptionPlan: userData.subscriptionPlan,
         subscriptionStatus: userData.subscriptionStatus,
         subscriptionExpiresAt: userData.subscriptionExpiresAt?.toISOString(),
         subscriptionPurchasedAt: userData.subscriptionPurchasedAt?.toISOString(),
       });
       
-      console.log('[UnifiedUser] ✅ Synced to database');
+      console.log('[UnifiedUser] ✅ Subscription data synced to database');
     } catch (error) {
       console.error('[UnifiedUser] Database sync error:', error);
       // Don't throw - local data is still saved

@@ -382,140 +382,144 @@ export default function SettingsScreen() {
       </SafeAreaView>
 
       {/* Paywall Modal */}
-      <Modal
-        visible={showPaywallModal}
-        animationType="slide"
-        presentationStyle="fullScreen"
-        onRequestClose={() => setShowPaywallModal(false)}
-      >
-        <PaywallScreen
-          onClose={() => setShowPaywallModal(false)}
-          onSubscribe={() => {
-            setShowPaywallModal(false);
-            showToast('Welcome to Ambitionly Pro! 🚀', 'success');
-          }}
-          onShowSignUp={() => {
-            setShowPaywallModal(false);
-            router.push('/auth?mode=signup&from=settings');
-          }}
-        />
-      </Modal>
+      {showPaywallModal && (
+        <Modal
+          visible
+          animationType="slide"
+          presentationStyle="fullScreen"
+          onRequestClose={() => setShowPaywallModal(false)}
+        >
+          <PaywallScreen
+            onClose={() => setShowPaywallModal(false)}
+            onSubscribe={() => {
+              setShowPaywallModal(false);
+              showToast('Welcome to Ambitionly Pro! 🚀', 'success');
+            }}
+            onShowSignUp={() => {
+              setShowPaywallModal(false);
+              router.push('/auth?mode=signup&from=settings');
+            }}
+          />
+        </Modal>
+      )}
 
       {/* Subscription Details Modal */}
-      <Modal
-        visible={showSubscriptionDetailsModal}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setShowSubscriptionDetailsModal(false)}
-      >
-        <View style={styles.modalContainer}>
-          <LinearGradient colors={['#000000', '#1A1A1A']} style={styles.modalGradient}>
-            <SafeAreaView style={styles.modalSafeArea}>
-              {/* Header */}
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Subscription Details</Text>
-                <TouchableOpacity
-                  style={styles.modalCloseButton}
-                  onPress={() => setShowSubscriptionDetailsModal(false)}
-                >
-                  <X size={24} color="#FFFFFF" />
-                </TouchableOpacity>
-              </View>
-
-              {/* Subscription Info */}
-              <View style={styles.subscriptionDetailsContainer}>
-                <View style={styles.subscriptionCard}>
-                  <View style={styles.subscriptionHeader}>
-                    <Crown size={24} color="#FFD700" />
-                    <Text style={styles.subscriptionTitle}>{getSubscriptionDisplayText()}</Text>
-                  </View>
-                  
-                  <View style={styles.subscriptionInfo}>
-                    <View style={styles.infoRow}>
-                      <Calendar size={16} color="#9A9A9A" />
-                      <Text style={styles.infoLabel}>Status:</Text>
-                      <Text style={styles.infoValue}>Active</Text>
-                    </View>
-                    
-                    {subscriptionState.expiresAt && (
-                      <View style={styles.infoRow}>
-                        <Calendar size={16} color="#9A9A9A" />
-                        <Text style={styles.infoLabel}>Expires:</Text>
-                        <Text style={styles.infoValue}>
-                          {subscriptionState.expiresAt.toLocaleDateString()}
-                        </Text>
-                      </View>
-                    )}
-                    
-                    <View style={styles.infoRow}>
-                      <CreditCard size={16} color="#9A9A9A" />
-                      <Text style={styles.infoLabel}>Plan:</Text>
-                      <Text style={styles.infoValue}>
-                        {subscriptionState.plan === 'monthly' ? 'Monthly' : 
-                         subscriptionState.plan === 'annual' ? 'Annual' : 
-                         subscriptionState.plan === 'lifetime' ? 'Lifetime' : 'Unknown'}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-
-                {/* Benefits */}
-                <View style={styles.benefitsContainer}>
-                  <Text style={styles.benefitsTitle}>Your Pro Benefits</Text>
-                  <View style={styles.benefitItem}>
-                    <Text style={styles.benefitText}>✓ Unlimited roadmap phases</Text>
-                  </View>
-                  <View style={styles.benefitItem}>
-                    <Text style={styles.benefitText}>✓ Advanced AI insights</Text>
-                  </View>
-                  <View style={styles.benefitItem}>
-                    <Text style={styles.benefitText}>✓ Priority support</Text>
-                  </View>
-                  <View style={styles.benefitItem}>
-                    <Text style={styles.benefitText}>✓ Export capabilities</Text>
-                  </View>
-                </View>
-
-                {/* Manage Subscription */}
-                <View style={styles.manageContainer}>
-                  <Text style={styles.manageTitle}>Manage Subscription</Text>
-                  <Text style={styles.manageDescription}>
-                    To cancel or modify your subscription, please go to your device's App Store settings.
-                  </Text>
-                  
+      {showSubscriptionDetailsModal && (
+        <Modal
+          visible
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={() => setShowSubscriptionDetailsModal(false)}
+        >
+          <View style={styles.modalContainer}>
+            <LinearGradient colors={['#000000', '#1A1A1A']} style={styles.modalGradient}>
+              <SafeAreaView style={styles.modalSafeArea}>
+                {/* Header */}
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>Subscription Details</Text>
                   <TouchableOpacity
-                    style={styles.cancelButton}
-                    onPress={() => {
-                      setShowSubscriptionDetailsModal(false);
-                      Alert.alert(
-                        'Cancel Subscription',
-                        'Are you sure you want to cancel your subscription? You will lose access to Pro features.',
-                        [
-                          { text: 'Keep Subscription', style: 'cancel' },
-                          {
-                            text: 'Cancel Subscription',
-                            style: 'destructive',
-                            onPress: async () => {
-                              try {
-                                await cancelSubscription();
-                                showToast('Subscription cancelled', 'success');
-                              } catch {
-                                showToast('Failed to cancel subscription', 'error');
-                              }
-                            },
-                          },
-                        ]
-                      );
-                    }}
+                    style={styles.modalCloseButton}
+                    onPress={() => setShowSubscriptionDetailsModal(false)}
                   >
-                    <Text style={styles.cancelButtonText}>Cancel Subscription</Text>
+                    <X size={24} color="#FFFFFF" />
                   </TouchableOpacity>
                 </View>
-              </View>
-            </SafeAreaView>
-          </LinearGradient>
-        </View>
-      </Modal>
+
+                {/* Subscription Info */}
+                <View style={styles.subscriptionDetailsContainer}>
+                  <View style={styles.subscriptionCard}>
+                    <View style={styles.subscriptionHeader}>
+                      <Crown size={24} color="#FFD700" />
+                      <Text style={styles.subscriptionTitle}>{getSubscriptionDisplayText()}</Text>
+                    </View>
+                    
+                    <View style={styles.subscriptionInfo}>
+                      <View style={styles.infoRow}>
+                        <Calendar size={16} color="#9A9A9A" />
+                        <Text style={styles.infoLabel}>Status:</Text>
+                        <Text style={styles.infoValue}>Active</Text>
+                      </View>
+                      
+                      {subscriptionState.expiresAt && (
+                        <View style={styles.infoRow}>
+                          <Calendar size={16} color="#9A9A9A" />
+                          <Text style={styles.infoLabel}>Expires:</Text>
+                          <Text style={styles.infoValue}>
+                            {subscriptionState.expiresAt.toLocaleDateString()}
+                          </Text>
+                        </View>
+                      )}
+                      
+                      <View style={styles.infoRow}>
+                        <CreditCard size={16} color="#9A9A9A" />
+                        <Text style={styles.infoLabel}>Plan:</Text>
+                        <Text style={styles.infoValue}>
+                          {subscriptionState.plan === 'monthly' ? 'Monthly' : 
+                           subscriptionState.plan === 'annual' ? 'Annual' : 
+                           subscriptionState.plan === 'lifetime' ? 'Lifetime' : 'Unknown'}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Benefits */}
+                  <View style={styles.benefitsContainer}>
+                    <Text style={styles.benefitsTitle}>Your Pro Benefits</Text>
+                    <View style={styles.benefitItem}>
+                      <Text style={styles.benefitText}>✓ Unlimited roadmap phases</Text>
+                    </View>
+                    <View style={styles.benefitItem}>
+                      <Text style={styles.benefitText}>✓ Advanced AI insights</Text>
+                    </View>
+                    <View style={styles.benefitItem}>
+                      <Text style={styles.benefitText}>✓ Priority support</Text>
+                    </View>
+                    <View style={styles.benefitItem}>
+                      <Text style={styles.benefitText}>✓ Export capabilities</Text>
+                    </View>
+                  </View>
+
+                  {/* Manage Subscription */}
+                  <View style={styles.manageContainer}>
+                    <Text style={styles.manageTitle}>Manage Subscription</Text>
+                    <Text style={styles.manageDescription}>
+                      To cancel or modify your subscription, please go to your device's App Store settings.
+                    </Text>
+                    
+                    <TouchableOpacity
+                      style={styles.cancelButton}
+                      onPress={() => {
+                        setShowSubscriptionDetailsModal(false);
+                        Alert.alert(
+                          'Cancel Subscription',
+                          'Are you sure you want to cancel your subscription? You will lose access to Pro features.',
+                          [
+                            { text: 'Keep Subscription', style: 'cancel' },
+                            {
+                              text: 'Cancel Subscription',
+                              style: 'destructive',
+                              onPress: async () => {
+                                try {
+                                  await cancelSubscription();
+                                  showToast('Subscription cancelled', 'success');
+                                } catch {
+                                  showToast('Failed to cancel subscription', 'error');
+                                }
+                              },
+                            },
+                          ]
+                        );
+                      }}
+                    >
+                      <Text style={styles.cancelButtonText}>Cancel Subscription</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </SafeAreaView>
+            </LinearGradient>
+          </View>
+        </Modal>
+      )}
     </LinearGradient>
   );
 }

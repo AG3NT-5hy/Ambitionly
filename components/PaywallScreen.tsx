@@ -656,6 +656,17 @@ export default function PaywallScreen({ onClose, onSubscribe, onShowSignUp }: Pa
               expiresAt: entitlement.expirationDate ? new Date(entitlement.expirationDate) : null,
               purchasedAt: entitlement.originalPurchaseDate ? new Date(entitlement.originalPurchaseDate) : new Date(),
             });
+            
+            // Trigger data sync after subscription update
+            setTimeout(() => {
+              try {
+                const { DeviceEventEmitter } = require('react-native');
+                DeviceEventEmitter.emit('ambition-sync-trigger');
+                console.log('[Paywall] ✅ Triggered data sync after purchase');
+              } catch (e) {
+                console.warn('[Paywall] Failed to trigger sync:', e);
+              }
+            }, 1000);
           } catch (error) {
             console.warn('[Paywall] Failed to update unified user subscription:', error);
           }

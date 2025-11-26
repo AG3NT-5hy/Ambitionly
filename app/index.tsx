@@ -91,6 +91,7 @@ export default function SplashScreen() {
       if (nextAppState === 'active' && isOnValidRoute && hasNavigatedRef.current) {
         console.log('[Splash] App returned to foreground, already on valid route:', segments);
         // Don't navigate if we're already on a valid route
+        // This prevents the navigation logic from re-running and causing hangs
         return;
       }
     });
@@ -116,6 +117,12 @@ export default function SplashScreen() {
     // Prevent multiple navigations
     if (hasNavigatedRef.current) {
       console.log('[Splash] Already navigated, skipping');
+      return;
+    }
+
+    // Check if app is active before navigating (prevents hangs when resuming)
+    if (AppState.currentState !== 'active') {
+      console.log('[Splash] App not active, deferring navigation');
       return;
     }
     
@@ -178,16 +185,25 @@ export default function SplashScreen() {
           }
         }
         
-        // Only navigate to roadmap if we have both goal and roadmap in storage
-        // AND user is registered (not guest)
-        if (storedGoal && parsedRoadmap && typeof storedGoal === 'string' && typeof parsedRoadmap === 'object' && parsedRoadmap.phases && isRegisteredUser) {
-          console.log('[Splash] Existing goal found in storage, navigating to roadmap');
+        // Navigate to roadmap if we have both goal and roadmap in storage
+        // This works for both guest users and registered users
+        // Guest users should be able to access their saved roadmap
+        if (storedGoal && parsedRoadmap && typeof storedGoal === 'string' && typeof parsedRoadmap === 'object' && parsedRoadmap.phases) {
+          console.log('[Splash] Existing goal and roadmap found in storage, navigating to roadmap');
+          console.log('[Splash] User status:', {
+            isGuestUser,
+            isRegisteredUser,
+            hasSupabaseSession: !!session?.user,
+            hasGoal: !!storedGoal,
+            hasRoadmap: !!parsedRoadmap,
+            goalLength: storedGoal?.length || 0,
+            roadmapPhases: parsedRoadmap?.phases?.length || 0,
+          });
           hasNavigatedRef.current = true;
           router.replace('/(main)/roadmap');
         } else {
-          // If registered user has no roadmap, show welcome screen but keep them logged in
-          // They can start a new onboarding without being logged out
-          // For guests or users without roadmaps, always go to welcome
+          // If user has no roadmap, show welcome screen
+          // Registered users stay logged in, guests can start fresh
           if (isRegisteredUser) {
             console.log('[Splash] Registered user with no roadmap, navigating to welcome (staying logged in)');
             console.log('[Splash] User data:', {
@@ -197,11 +213,13 @@ export default function SplashScreen() {
               roadmapPhases: parsedRoadmap?.phases?.length || 0,
             });
           } else {
-            console.log('[Splash] No existing goal in storage or guest user, navigating to welcome');
+            console.log('[Splash] No existing goal/roadmap in storage, navigating to welcome');
             console.log('[Splash] User status:', {
               isGuestUser,
               isRegisteredUser,
               hasSupabaseSession: !!session?.user,
+              hasGoal: !!storedGoal,
+              hasRoadmap: !!parsedRoadmap,
             });
           }
           hasNavigatedRef.current = true;

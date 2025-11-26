@@ -1,6 +1,6 @@
 import createContextHook from '@nkzw/create-context-hook';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { trpc } from '../lib/trpc'
 import { useUi } from '../providers/UiProvider'
 import { signInWithGoogleNative } from '../lib/google-signin-native';
@@ -25,6 +25,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const [user, setUser] = useState<User | null>(null);
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [shouldShowAuth, setShouldShowAuth] = useState<boolean>(false);
+  const logoutTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // tRPC hooks
   const signupMutation = trpc.auth.signup.useMutation();
@@ -160,8 +161,14 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
   }, []);
 
-  const logout = useCallback(async () => {
+  const logout = useCallback(async (showToastMessage: boolean = true) => {
     try {
+      // Clear any pending logout timeout since we're actually logging out now
+      if (logoutTimeoutRef.current) {
+        clearTimeout(logoutTimeoutRef.current);
+        logoutTimeoutRef.current = null;
+      }
+
       // Sign out from Supabase
       await supabase.auth.signOut();
 
@@ -177,10 +184,15 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       setIsAuthenticated(false);
       setShouldShowAuth(false);
 
-      showToast('Logged out successfully', 'success');
+      // Only show toast if explicitly requested (not during sign-in flow)
+      if (showToastMessage) {
+        showToast('Logged out successfully', 'success');
+      }
     } catch (error) {
       console.error('Logout error:', error);
-      showToast('Failed to logout', 'error');
+      if (showToastMessage) {
+        showToast('Failed to logout', 'error');
+      }
     }
   }, [showToast]);
 
@@ -222,16 +234,37 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       async (event, session) => {
         console.log('🔐 Auth state changed:', event);
         if (event === 'SIGNED_IN' && session) {
+          // Clear any pending logout timeout since we're signing in
+          // This handles the case where SIGNED_OUT fires before SIGNED_IN during Google sign-in
+          if (logoutTimeoutRef.current) {
+            clearTimeout(logoutTimeoutRef.current);
+            logoutTimeoutRef.current = null;
+          }
           await syncSupabaseSession(session);
           showToast('Signed in successfully!', 'success');
         } else if (event === 'SIGNED_OUT') {
-          logout();
+          // During Google sign-in, Supabase may emit SIGNED_OUT before SIGNED_IN
+          // Delay logout handling to see if SIGNED_IN follows (indicates session switch, not real logout)
+          // Clear any existing timeout first
+          if (logoutTimeoutRef.current) {
+            clearTimeout(logoutTimeoutRef.current);
+          }
+          logoutTimeoutRef.current = setTimeout(() => {
+            logoutTimeoutRef.current = null;
+            // Only logout if we're still signed out after delay (user actually logged out)
+            logout(true); // Show toast only if it's a real logout
+          }, 1200); // Wait 1.2 seconds - if SIGNED_IN comes, it will cancel this
         }
       }
     );
 
     return () => {
       subscription.unsubscribe();
+      // Clean up timeout on unmount
+      if (logoutTimeoutRef.current) {
+        clearTimeout(logoutTimeoutRef.current);
+        logoutTimeoutRef.current = null;
+      }
     };
   }, [syncSupabaseSession, showToast, logout]);
 
@@ -324,6 +357,11 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       const { success, error } = await signInWithGoogleNative();
       
       if (!success) {
+        // Clear any pending logout timeout
+        if (logoutTimeoutRef.current) {
+          clearTimeout(logoutTimeoutRef.current);
+          logoutTimeoutRef.current = null;
+        }
         // Don't show error if user cancelled
         if (error && !error.message?.includes('cancelled') && !error.message?.includes('CANCELLED')) {
           showToast(error.message || 'Failed to sign in with Google', 'error');
@@ -333,8 +371,14 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
       // The Supabase auth state change listener will handle the rest
       // It will call syncSupabaseSession automatically
+      // The delayed logout timeout will be cancelled when SIGNED_IN event fires
       return true;
     } catch (error) {
+      // Clear any pending logout timeout
+      if (logoutTimeoutRef.current) {
+        clearTimeout(logoutTimeoutRef.current);
+        logoutTimeoutRef.current = null;
+      }
       console.error('Google sign-in error:', error);
       const message = error instanceof Error ? error.message : 'Failed to sign in with Google';
       showToast(message, 'error');

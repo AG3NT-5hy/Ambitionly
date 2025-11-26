@@ -153,6 +153,26 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
       syncInProgressRef.current = true;
       console.log('[Ambition] Syncing data to database (premium user)...');
       
+      // Get subscription data from unified user store
+      let subscriptionPlan: string | undefined;
+      let subscriptionStatus: string | null | undefined;
+      let subscriptionExpiresAt: string | null | undefined;
+      let subscriptionPurchasedAt: string | null | undefined;
+      
+      try {
+        const { STORAGE_KEYS } = await import('../constants');
+        const storedUser = await AsyncStorage.getItem(STORAGE_KEYS.USER);
+        if (storedUser) {
+          const userData = JSON.parse(storedUser);
+          subscriptionPlan = userData.subscriptionPlan;
+          subscriptionStatus = userData.subscriptionStatus;
+          subscriptionExpiresAt = userData.subscriptionExpiresAt ? new Date(userData.subscriptionExpiresAt).toISOString() : null;
+          subscriptionPurchasedAt = userData.subscriptionPurchasedAt ? new Date(userData.subscriptionPurchasedAt).toISOString() : null;
+        }
+      } catch (subError) {
+        console.warn('[Ambition] Failed to get subscription data for sync:', subError);
+      }
+      
       // Use mutateAsync for proper async handling
       await updateUserMutation.mutateAsync({
         email: userSession.email,
@@ -164,9 +184,14 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         completedTasks: completedTasks.length > 0 ? JSON.stringify(completedTasks) : null,
         streakData: streakData.streak > 0 ? JSON.stringify(streakData) : null,
         taskTimers: taskTimers.length > 0 ? JSON.stringify(taskTimers) : null,
+        // Include subscription data in sync
+        subscriptionPlan: subscriptionPlan,
+        subscriptionStatus: subscriptionStatus,
+        subscriptionExpiresAt: subscriptionExpiresAt,
+        subscriptionPurchasedAt: subscriptionPurchasedAt,
       });
       
-      console.log('[Ambition] ✅ Data synced to database successfully');
+      console.log('[Ambition] ✅ Data synced to database successfully (including subscription)');
     } catch (error) {
       console.error('[Ambition] Error syncing data to database:', error);
       // Don't throw - sync failures shouldn't break the app
@@ -206,9 +231,20 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         storedTaskTimers,
       ] = await Promise.race([storagePromise, timeoutPromise]) as string[];
 
-      if (storedGoal) setGoalState(storedGoal);
-      if (storedTimeline) setTimelineState(storedTimeline);
-      if (storedTimeCommitment) setTimeCommitmentState(storedTimeCommitment);
+      if (storedGoal) {
+        setGoalState(storedGoal);
+        console.log('[Ambition] ✅ Goal loaded from storage:', storedGoal.substring(0, 50) + '...');
+      } else {
+        console.log('[Ambition] No goal found in storage');
+      }
+      if (storedTimeline) {
+        setTimelineState(storedTimeline);
+        console.log('[Ambition] ✅ Timeline loaded from storage:', storedTimeline);
+      }
+      if (storedTimeCommitment) {
+        setTimeCommitmentState(storedTimeCommitment);
+        console.log('[Ambition] ✅ Time commitment loaded from storage:', storedTimeCommitment);
+      }
       if (storedAnswers) {
         try {
           const parsed = JSON.parse(storedAnswers);
@@ -277,13 +313,21 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     }
   }, []);
 
-  // Load data from storage on init
+  // Load data from storage on init (only once)
+  const hasLoadedRef = useRef(false);
   useEffect(() => {
+    // Prevent re-hydration when app resumes from background
+    if (hasLoadedRef.current) {
+      console.log('[Ambition] Already loaded, skipping re-hydration');
+      return;
+    }
+
     let isMounted = true;
     
     const loadData = async () => {
       await loadDataFromStorage();
       if (isMounted) {
+        hasLoadedRef.current = true;
         setIsHydrated(true);
       }
     };
@@ -292,6 +336,7 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     const fallbackTimeout = setTimeout(() => {
       if (isMounted && !isHydrated) {
         console.warn('Hydration timeout, marking as hydrated');
+        hasLoadedRef.current = true;
         setIsHydrated(true);
       }
     }, 3000);
@@ -369,27 +414,34 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         if (!timer.isActive || timer.isCompleted) return;
 
         const wasComplete = previousTimerStates.current.get(timer.taskId) || false;
-        const isNowComplete = isTaskTimerComplete(timer.taskId);
-        const notificationKey = `fallback-${timer.taskId}-${timer.startTime}`;
         
-        // Calculate elapsed time to ensure timer has actually been running
+        // Calculate elapsed time and required duration FIRST to verify completion
         const elapsed = Date.now() - timer.startTime;
         const requiredDuration = timer.duration * 60 * 1000; // Required duration in milliseconds
+        
+        // CRITICAL: Only consider timer complete if elapsed time is FULLY >= required duration
+        // Use strict comparison with no tolerance to prevent premature notifications
+        const isActuallyComplete = elapsed >= requiredDuration;
+        
+        // Only use isTaskTimerComplete if we've verified the elapsed time is correct
+        const isNowComplete = isActuallyComplete && isTaskTimerComplete(timer.taskId);
+        const notificationKey = `fallback-${timer.taskId}-${timer.startTime}`;
         
         // Only send fallback notification if:
         // 1. Timer just completed (transitioned from not complete to complete)
         // 2. We haven't sent a fallback notification for this timer instance
-        // 3. No notification was scheduled (notificationId is null/undefined) OR scheduled notification failed
-        // 4. Timer has actually run for the full required duration (no premature triggers)
+        // 3. Timer has ACTUALLY run for the FULL required duration (STRICT check, no tolerance)
+        // 4. No notification was scheduled (notificationId is null/undefined) - fallback only
         if (!wasComplete && isNowComplete && 
             !notificationSentRef.current.has(notificationKey) &&
-            elapsed >= requiredDuration * 0.98) { // Allow 2% tolerance for timing
+            elapsed >= requiredDuration) { // STRICT: Must be fully complete, no tolerance
           
           // Only send fallback if no notification was scheduled (scheduling failed)
           // If notificationId exists, we assume the scheduled notification will fire
           // The fallback is only for cases where scheduling failed from the start
           if (!timer.notificationId) {
             console.log(`[Notifications] Timer completed for task ${timer.taskId} - no notification was scheduled, sending fallback notification`);
+            console.log(`[Notifications] Timer details: elapsed=${elapsed}ms, required=${requiredDuration}ms, duration=${timer.duration}min`);
             
             // Find the task title for the notification
             let taskTitle = 'Task';
@@ -415,7 +467,11 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
             console.log(`[Notifications] ✅ Fallback notification sent for completed task: ${taskTitle}`);
           } else {
             console.log(`[Notifications] Timer completed for task ${timer.taskId} - scheduled notification (ID: ${timer.notificationId}) should fire`);
+            console.log(`[Notifications] Timer details: elapsed=${elapsed}ms, required=${requiredDuration}ms, duration=${timer.duration}min`);
           }
+        } else if (!wasComplete && isNowComplete && elapsed < requiredDuration) {
+          // Log warning if timer is marked complete but hasn't actually run long enough
+          console.warn(`[Notifications] ⚠️ Timer ${timer.taskId} marked complete but elapsed (${elapsed}ms) < required (${requiredDuration}ms). NOT sending notification.`);
         }
 
         // Update previous state
@@ -446,6 +502,7 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     }
     setGoalState(sanitized);
     await AsyncStorage.setItem(STORAGE_KEYS.GOAL, sanitized);
+    console.log('[Ambition] ✅ Goal saved to storage:', sanitized.substring(0, 50) + '...');
     // Sync to database
     await syncAmbitionDataToDatabase();
   };
@@ -718,6 +775,10 @@ Output ONLY valid JSON in this exact format:
 
       setRoadmapState(processedRoadmap);
       await AsyncStorage.setItem(STORAGE_KEYS.ROADMAP, JSON.stringify(processedRoadmap));
+      console.log('[Ambition] ✅ Roadmap saved to storage:', {
+        phases: processedRoadmap.phases.length,
+        roadmapId: processedRoadmap.id,
+      });
       
       // Clear all existing timers when generating a new roadmap
       console.log('[Ambition] Clearing existing timers for new roadmap');
@@ -1012,9 +1073,11 @@ Output ONLY valid JSON in this exact format:
     let notificationId: string | null = null;
     if (durationInSeconds >= 5 && !isNaN(durationInSeconds) && isFinite(durationInSeconds)) {
       console.log(`[Timer] Scheduling notification for ${durationInSeconds} seconds (${duration} minutes)`);
+      console.log(`[Timer] Timer start time: ${newTimer.startTime}, expected completion: ${newTimer.startTime + (durationInSeconds * 1000)}`);
       notificationId = await NotificationService.scheduleTaskCompleteNotification(taskTitle, durationInSeconds, taskId);
       if (notificationId) {
         console.log(`[Timer] ✅ Notification scheduled successfully with ID: ${notificationId}`);
+        console.log(`[Timer] Notification should fire in ${durationInSeconds} seconds (${duration} minutes)`);
       } else {
         console.warn(`[Timer] ⚠️ Failed to schedule notification - fallback will be used when timer completes`);
       }
@@ -1086,9 +1149,29 @@ Output ONLY valid JSON in this exact format:
     const timer = getTaskTimer(taskId);
     if (!timer || !timer.isActive) return false;
     
+    // Validate timer data
+    if (!timer.startTime || !timer.duration || timer.duration <= 0) {
+      console.warn(`[Timer] Invalid timer data for task ${taskId}:`, timer);
+      return false;
+    }
+    
     const elapsed = Date.now() - timer.startTime;
     const requiredTime = timer.duration * 60 * 1000; // convert to milliseconds
-    return elapsed >= requiredTime;
+    
+    // Validate calculations
+    if (isNaN(elapsed) || isNaN(requiredTime) || !isFinite(elapsed) || !isFinite(requiredTime)) {
+      console.warn(`[Timer] Invalid timer calculations for task ${taskId}: elapsed=${elapsed}, required=${requiredTime}`);
+      return false;
+    }
+    
+    // Only return true if elapsed time is FULLY >= required time (strict check)
+    const isComplete = elapsed >= requiredTime;
+    
+    if (isComplete) {
+      console.log(`[Timer] Timer ${taskId} is complete: elapsed=${elapsed}ms, required=${requiredTime}ms, duration=${timer.duration}min`);
+    }
+    
+    return isComplete;
   };
 
   const getTaskTimerProgress = (taskId: string): { elapsed: number; total: number; percentage: number } => {

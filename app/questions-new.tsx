@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Animated, TouchableWithoutFeedback, Keyboard, Platform, KeyboardAvoidingView } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Animated, TouchableWithoutFeedback, Keyboard, Platform, KeyboardAvoidingView, ScrollView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -141,8 +141,8 @@ export default function QuestionsScreen() {
         <SafeAreaView style={styles.safeArea}>
           <KeyboardAvoidingView
             style={styles.keyboardAvoiding}
-            behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
           >
             <View style={styles.header}>
               <View style={styles.progressContainer}>
@@ -161,48 +161,55 @@ export default function QuestionsScreen() {
               </Text>
             </View>
 
-            <Animated.View
-              style={[
-                styles.content,
-                {
-                  opacity: fadeAnim,
-                  transform: [{ translateY: slideAnim }],
-                },
-              ]}
+            <ScrollView
+              style={styles.scrollView}
+              contentContainerStyle={styles.scrollContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
             >
-              <View style={styles.questionHeader}>
-                <View style={styles.iconContainer}>
-                  <Target size={32} color="#00E6E6" />
+              <Animated.View
+                style={[
+                  styles.content,
+                  {
+                    opacity: fadeAnim,
+                    transform: [{ translateY: slideAnim }],
+                  },
+                ]}
+              >
+                <View style={styles.questionHeader}>
+                  <View style={styles.iconContainer}>
+                    <Target size={32} color="#00E6E6" />
+                  </View>
+                  <Text style={styles.questionTitle}>{currentQuestion.title}</Text>
+                  <Text style={styles.questionSubtitle}>{currentQuestion.subtitle}</Text>
                 </View>
-                <Text style={styles.questionTitle}>{currentQuestion.title}</Text>
-                <Text style={styles.questionSubtitle}>{currentQuestion.subtitle}</Text>
-              </View>
 
-              <View style={styles.inputContainer}>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder={currentQuestion.placeholder}
-                  placeholderTextColor="#666666"
-                  value={answer}
-                  onChangeText={setAnswer}
-                  multiline
-                  numberOfLines={4}
-                  textAlignVertical="top"
-                  returnKeyType="done"
-                  blurOnSubmit={true}
-                  accessibilityLabel={`Answer for: ${currentQuestion.title}`}
-                  accessibilityHint="Enter your answer to this question"
-                  maxLength={1000}
-                  {...Platform.select({
-                    android: {
-                      underlineColorAndroid: 'transparent',
-                      autoCorrect: false,
-                      autoCapitalize: 'sentences',
-                    },
-                  })}
-                />
-              </View>
-            </Animated.View>
+                <View style={styles.inputContainer}>
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder={currentQuestion.placeholder}
+                    placeholderTextColor="#666666"
+                    value={answer}
+                    onChangeText={setAnswer}
+                    multiline
+                    numberOfLines={4}
+                    textAlignVertical="top"
+                    returnKeyType="done"
+                    blurOnSubmit={true}
+                    accessibilityLabel={`Answer for: ${currentQuestion.title}`}
+                    accessibilityHint="Enter your answer to this question"
+                    maxLength={1000}
+                    {...Platform.select({
+                      android: {
+                        underlineColorAndroid: 'transparent',
+                        autoCorrect: false,
+                        autoCapitalize: 'sentences',
+                      },
+                    })}
+                  />
+                </View>
+              </Animated.View>
+            </ScrollView>
 
             <View style={styles.footer}>
               <TouchableOpacity
@@ -251,6 +258,13 @@ const styles = StyleSheet.create({
   keyboardAvoiding: {
     flex: 1,
   },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 20,
+  },
   header: {
     alignItems: 'center',
     paddingVertical: 24,
@@ -274,12 +288,11 @@ const styles = StyleSheet.create({
     color: '#9A9A9A',
   },
   content: {
-    flex: 1,
-    justifyContent: 'center',
+    paddingTop: 20,
   },
   questionHeader: {
     alignItems: 'center',
-    marginBottom: 48,
+    marginBottom: 32,
   },
   iconContainer: {
     width: 64,
@@ -305,7 +318,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   inputContainer: {
-    marginBottom: 32,
+    marginBottom: 24,
+    marginTop: 16,
   },
   textInput: {
     backgroundColor: '#1A1A1A',
@@ -316,9 +330,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#2D2D2D',
     minHeight: 120,
+    maxHeight: 200,
   },
   footer: {
-    paddingVertical: 24,
+    paddingTop: 24,
+    paddingBottom: 16,
   },
   nextButton: {
     borderRadius: 28,
