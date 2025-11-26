@@ -26,6 +26,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [shouldShowAuth, setShouldShowAuth] = useState<boolean>(false);
   const logoutTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const logoutHandledRef = useRef<boolean>(false);
 
   // tRPC hooks
   const signupMutation = trpc.auth.signup.useMutation();
@@ -162,7 +163,16 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   }, []);
 
   const logout = useCallback(async (showToastMessage: boolean = true) => {
+    // Prevent duplicate logout calls
+    if (logoutHandledRef.current) {
+      console.log('[AuthStore] Logout already handled, skipping duplicate call');
+      return;
+    }
+    
     try {
+      // Mark logout as handled to prevent duplicate calls
+      logoutHandledRef.current = true;
+      
       // Clear any pending logout timeout since we're actually logging out now
       if (logoutTimeoutRef.current) {
         clearTimeout(logoutTimeoutRef.current);
@@ -193,6 +203,11 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (showToastMessage) {
         showToast('Failed to logout', 'error');
       }
+    } finally {
+      // Reset the flag after a delay to allow for future sign-outs
+      setTimeout(() => {
+        logoutHandledRef.current = false;
+      }, 2000);
     }
   }, [showToast]);
 
@@ -240,20 +255,44 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
             clearTimeout(logoutTimeoutRef.current);
             logoutTimeoutRef.current = null;
           }
+          // Reset logout handled flag when signing in
+          logoutHandledRef.current = false;
           await syncSupabaseSession(session);
           showToast('Signed in successfully!', 'success');
         } else if (event === 'SIGNED_OUT') {
-          // During Google sign-in, Supabase may emit SIGNED_OUT before SIGNED_IN
-          // Delay logout handling to see if SIGNED_IN follows (indicates session switch, not real logout)
+          // During sign-in (especially Google), Supabase may emit SIGNED_OUT before SIGNED_IN
+          // This is a session switch, not a real logout
+          // Delay logout handling to see if SIGNED_IN follows (which will cancel this timeout)
           // Clear any existing timeout first
           if (logoutTimeoutRef.current) {
             clearTimeout(logoutTimeoutRef.current);
           }
-          logoutTimeoutRef.current = setTimeout(() => {
+          
+          // Check if logout was already handled (prevent duplicate toasts)
+          if (logoutHandledRef.current) {
+            console.log('[AuthStore] SIGNED_OUT event received but logout already handled, ignoring');
+            return;
+          }
+          
+          // Set a timeout that will be cancelled if SIGNED_IN follows
+          logoutTimeoutRef.current = setTimeout(async () => {
             logoutTimeoutRef.current = null;
+            
+            // Double-check that we're still signed out (SIGNED_IN might have happened)
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session) {
+              console.log('[AuthStore] Session exists after SIGNED_OUT timeout - this was a sign-in, not logout, ignoring');
+              return;
+            }
+            
             // Only logout if we're still signed out after delay (user actually logged out)
-            logout(true); // Show toast only if it's a real logout
-          }, 1200); // Wait 1.2 seconds - if SIGNED_IN comes, it will cancel this
+            // Check again if logout was handled during the delay
+            if (!logoutHandledRef.current) {
+              // Don't show toast here - UI components (account.tsx, settings.tsx) already show it
+              // This prevents duplicate toasts when signOut() triggers multiple SIGNED_OUT events
+              logout(false); // Don't show toast - UI components handle it
+            }
+          }, 2000); // Wait 2 seconds - if SIGNED_IN comes, it will cancel this
         }
       }
     );

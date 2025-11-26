@@ -138,15 +138,23 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     }
     
     try {
+      console.log('[Ambition] 🔄 Starting sync to database...');
       const userSession = await checkUserSession();
       
+      console.log('[Ambition] User session check result:', {
+        isRegistered: userSession.isRegistered,
+        email: userSession.email ? `${userSession.email.substring(0, 5)}...` : 'none',
+        hasPremium: userSession.hasPremium,
+      });
+      
       if (!userSession.isRegistered || !userSession.email) {
-        console.log('[Ambition] User not registered, skipping sync');
+        console.log('[Ambition] ⚠️ User not registered, skipping sync');
         return;
       }
       
       if (!userSession.hasPremium) {
-        console.log('[Ambition] User does not have premium subscription, skipping cloud sync');
+        console.log('[Ambition] ⚠️ User does not have premium subscription, skipping cloud sync');
+        console.log('[Ambition] Note: Subscription data is synced separately via unified-user-store');
         return;
       }
       
@@ -173,8 +181,8 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         console.warn('[Ambition] Failed to get subscription data for sync:', subError);
       }
       
-      // Use mutateAsync for proper async handling
-      await updateUserMutation.mutateAsync({
+      // Prepare sync payload
+      const syncPayload = {
         email: userSession.email,
         goal: goal || null,
         timeline: timeline || null,
@@ -189,11 +197,49 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         subscriptionStatus: subscriptionStatus,
         subscriptionExpiresAt: subscriptionExpiresAt,
         subscriptionPurchasedAt: subscriptionPurchasedAt,
+      };
+      
+      console.log('[Ambition] Syncing data payload:', {
+        email: syncPayload.email,
+        hasGoal: !!syncPayload.goal,
+        hasRoadmap: !!syncPayload.roadmap,
+        goalLength: syncPayload.goal?.length || 0,
+        roadmapLength: syncPayload.roadmap?.length || 0,
+        completedTasksCount: syncPayload.completedTasks ? JSON.parse(syncPayload.completedTasks).length : 0,
+        subscriptionPlan: syncPayload.subscriptionPlan,
+        subscriptionStatus: syncPayload.subscriptionStatus,
       });
       
-      console.log('[Ambition] ✅ Data synced to database successfully (including subscription)');
+      // Use mutateAsync for proper async handling
+      const result = await updateUserMutation.mutateAsync(syncPayload);
+      
+      console.log('[Ambition] ✅ Data synced to database successfully:', {
+        success: result.success,
+        userId: result.user?.id,
+        email: result.user?.email,
+        updatedAt: result.user?.updatedAt,
+      });
     } catch (error) {
-      console.error('[Ambition] Error syncing data to database:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      
+      console.error('[Ambition] ❌ Error syncing data to database:', {
+        message: errorMessage,
+        stack: errorStack,
+        error: error,
+      });
+      
+      // Log more details about the error
+      if (errorMessage.includes('Network') || errorMessage.includes('fetch') || errorMessage.includes('Failed to fetch')) {
+        console.error('[Ambition] Network error - backend may be unreachable');
+      } else if (errorMessage.includes('JSON') || errorMessage.includes('parse')) {
+        console.error('[Ambition] JSON parsing error - backend may have returned invalid response');
+      } else if (errorMessage.includes('User not found') || errorMessage.includes('not found')) {
+        console.error('[Ambition] User not found in database - user may need to be created first');
+      } else {
+        console.error('[Ambition] Unknown sync error - check backend logs');
+      }
+      
       // Don't throw - sync failures shouldn't break the app
     } finally {
       syncInProgressRef.current = false;
@@ -1069,17 +1115,26 @@ Output ONLY valid JSON in this exact format:
     // Schedule notification for when timer completes (in seconds)
     const durationInSeconds = duration * 60;
     
+    // Calculate start time first (before creating timer object)
+    const startTime = Date.now();
+    
     // Validate duration before scheduling - must be at least 5 seconds
     let notificationId: string | null = null;
     if (durationInSeconds >= 5 && !isNaN(durationInSeconds) && isFinite(durationInSeconds)) {
-      console.log(`[Timer] Scheduling notification for ${durationInSeconds} seconds (${duration} minutes)`);
-      console.log(`[Timer] Timer start time: ${newTimer.startTime}, expected completion: ${newTimer.startTime + (durationInSeconds * 1000)}`);
-      notificationId = await NotificationService.scheduleTaskCompleteNotification(taskTitle, durationInSeconds, taskId);
-      if (notificationId) {
-        console.log(`[Timer] ✅ Notification scheduled successfully with ID: ${notificationId}`);
-        console.log(`[Timer] Notification should fire in ${durationInSeconds} seconds (${duration} minutes)`);
-      } else {
-        console.warn(`[Timer] ⚠️ Failed to schedule notification - fallback will be used when timer completes`);
+      try {
+        console.log(`[Timer] Scheduling notification for ${durationInSeconds} seconds (${duration} minutes)`);
+        console.log(`[Timer] Timer start time: ${startTime}, expected completion: ${startTime + (durationInSeconds * 1000)}`);
+        notificationId = await NotificationService.scheduleTaskCompleteNotification(taskTitle, durationInSeconds, taskId);
+        if (notificationId) {
+          console.log(`[Timer] ✅ Notification scheduled successfully with ID: ${notificationId}`);
+          console.log(`[Timer] Notification should fire in ${durationInSeconds} seconds (${duration} minutes)`);
+        } else {
+          console.warn(`[Timer] ⚠️ Failed to schedule notification - fallback will be used when timer completes`);
+        }
+      } catch (notificationError) {
+        console.error(`[Timer] Error scheduling notification:`, notificationError);
+        console.warn(`[Timer] ⚠️ Continuing without notification - timer will still start`);
+        // Continue without notification - timer should still work
       }
     } else {
       console.error(`[Timer] Invalid duration: ${durationInSeconds} seconds (from ${duration} minutes). Cannot schedule notification. Minimum is 5 seconds.`);
@@ -1087,7 +1142,7 @@ Output ONLY valid JSON in this exact format:
 
     const newTimer: TaskTimer = {
       taskId,
-      startTime: Date.now(),
+      startTime,
       duration,
       isActive: true,
       isCompleted: false,
@@ -1100,14 +1155,30 @@ Output ONLY valid JSON in this exact format:
     // Add new timer while preserving all existing timers
     const updatedTimers = [...taskTimers.filter(t => t.taskId !== taskId), newTimer];
     setTaskTimersState(updatedTimers);
-    await AsyncStorage.setItem(STORAGE_KEYS.TASK_TIMERS, JSON.stringify(updatedTimers));
+    
+    // Save to storage (timer is already in memory, so continue even if storage fails)
+    try {
+      await AsyncStorage.setItem(STORAGE_KEYS.TASK_TIMERS, JSON.stringify(updatedTimers));
+      console.log(`[Timer] Timer saved to storage successfully`);
+    } catch (storageError) {
+      console.error(`[Timer] Error saving timer to storage:`, storageError);
+      // Timer is already in memory state, so it will still work
+      // Log warning but don't throw - timer functionality is not affected
+      console.warn(`[Timer] ⚠️ Timer started but may not persist after app restart`);
+    }
     
     console.log(`[Timer] Timer started successfully for task ${taskId}`);
     console.log(`[Timer] All timers after start:`, updatedTimers.filter(t => t.isActive).map(t => t.taskId));
     analytics.track('task_started', { task_id: taskId, duration_minutes: duration });
     
-    // Sync to database
-    await syncAmbitionDataToDatabase();
+    // Sync to database (don't fail timer start if sync fails)
+    try {
+      await syncAmbitionDataToDatabase();
+    } catch (syncError) {
+      console.error(`[Timer] Error syncing timer to database:`, syncError);
+      console.warn(`[Timer] ⚠️ Timer started successfully but database sync failed - timer will continue to work locally`);
+      // Don't throw - timer is already saved locally and working
+    }
   };
 
   const stopTaskTimer = async (taskId: string) => {

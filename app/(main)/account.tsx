@@ -114,12 +114,13 @@ export default function AccountScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              await signOut();
-              // Additional delay to ensure all state is cleared and navigation refs are reset
-              await new Promise(resolve => setTimeout(resolve, 500));
-              showToast('Signed out successfully', 'success');
-              // Use replace to prevent going back, and reset navigation state
+              // Navigate immediately to prevent showing roadmap screen
+              router.dismissAll();
               router.replace('/welcome');
+              
+              // Then perform sign-out (this will clear data in background)
+              await signOut();
+              showToast('Signed out successfully', 'success');
             } catch (error) {
               console.error('Sign out error:', error);
               showToast('Failed to sign out', 'error');

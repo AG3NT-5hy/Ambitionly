@@ -68,12 +68,33 @@ export default function AuthScreen() {
 
     setIsLoading(true);
     
-    // Add timeout to prevent infinite loading
-    const timeoutId = setTimeout(() => {
-      console.error('[Auth] Sign in/up timeout - taking too long');
+    // Add timeout to prevent infinite loading (increased to 60 seconds for sign-up)
+    let timeoutTriggered = false;
+    const timeoutId = setTimeout(async () => {
+      console.warn('[Auth] Sign in/up taking longer than expected, checking if it succeeded...');
+      timeoutTriggered = true;
+      
+      // Before showing error, check if sign-up actually succeeded
+      try {
+        const { supabase } = await import('../lib/supabase');
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          console.log('[Auth] Sign-up succeeded despite timeout - clearing error');
+          // Sign-up succeeded, clear any error and continue
+          setError('');
+          setIsLoading(false);
+          // The sign-up process will complete in the background
+          return;
+        }
+      } catch (e) {
+        console.warn('[Auth] Error checking session after timeout:', e);
+      }
+      
+      // Only show error if sign-up hasn't succeeded
+      console.error('[Auth] Sign in/up timeout - taking too long and no session found');
       setIsLoading(false);
       setError('Request timed out. Please try again.');
-    }, 30000); // 30 second timeout
+    }, 60000); // 60 second timeout (increased for sign-up operations)
     
     try {
       let result;
@@ -90,6 +111,12 @@ export default function AuthScreen() {
       }
 
       clearTimeout(timeoutId);
+      
+      // If timeout was triggered but sign-up succeeded, clear the error
+      if (timeoutTriggered) {
+        console.log('[Auth] Sign-up completed after timeout - clearing any error message');
+        setError('');
+      }
 
       // Check if sign in/up was successful - either through result or Supabase session
       let signInSuccessful = result?.success === true;
@@ -109,6 +136,8 @@ export default function AuthScreen() {
       }
 
       if (signInSuccessful) {
+        // Clear any error that might have been set during timeout
+        setError('');
         console.log('[Auth] Sign in/up successful, waiting for user data to be saved...');
         
         // Wait for unified user store to save user data to AsyncStorage
@@ -243,16 +272,43 @@ export default function AuthScreen() {
     setError('');
     setIsLoadingGoogle(true);
     
-    // Add timeout to prevent infinite loading
-    const timeoutId = setTimeout(() => {
-      console.error('[Auth] Google sign-in timeout - taking too long');
+    // Add timeout to prevent infinite loading (increased to 60 seconds)
+    let googleTimeoutTriggered = false;
+    const timeoutId = setTimeout(async () => {
+      console.warn('[Auth] Google sign-in taking longer than expected, checking if it succeeded...');
+      googleTimeoutTriggered = true;
+      
+      // Before showing error, check if sign-in actually succeeded
+      try {
+        const { supabase } = await import('../lib/supabase');
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          console.log('[Auth] Google sign-in succeeded despite timeout - clearing error');
+          // Sign-in succeeded, clear any error and continue
+          setError('');
+          setIsLoadingGoogle(false);
+          // The sign-in process will complete in the background
+          return;
+        }
+      } catch (e) {
+        console.warn('[Auth] Error checking session after Google timeout:', e);
+      }
+      
+      // Only show error if sign-in hasn't succeeded
+      console.error('[Auth] Google sign-in timeout - taking too long and no session found');
       setIsLoadingGoogle(false);
       setError('Request timed out. Please try again.');
-    }, 30000); // 30 second timeout
+    }, 60000); // 60 second timeout (increased for sign-in operations)
     
     try {
       const success = await signInWithGoogle();
       clearTimeout(timeoutId);
+      
+      // If timeout was triggered but sign-in succeeded, clear the error
+      if (googleTimeoutTriggered) {
+        console.log('[Auth] Google sign-in completed after timeout - clearing any error message');
+        setError('');
+      }
       
       if (!success) {
         setIsLoadingGoogle(false);
@@ -261,6 +317,8 @@ export default function AuthScreen() {
       }
       
       if (success) {
+        // Clear any error that might have been set during timeout
+        setError('');
         // Optimized: Check for user data with fewer attempts and shorter intervals
         let userSaved = false;
         for (let attempt = 0; attempt < 6; attempt++) {

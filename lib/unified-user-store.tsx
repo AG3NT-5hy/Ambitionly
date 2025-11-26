@@ -1568,50 +1568,76 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         console.warn('[UnifiedUser] ⚠️ Continuing sign-in without database user (backend may be unavailable)');
       }
       
-      // 4. Create user object with subscription data FIRST (before restoring data)
+      // 4. Collect guest data for migration (including subscription)
+      const guestData = await collectGuestData();
+      console.log('[UnifiedUser] Guest data collected for migration (sign-in)');
+      
+      // 5. Check for local roadmap/goal data BEFORE any operations
+      const localGoal = await AsyncStorage.getItem(STORAGE_KEYS.GOAL);
+      const localRoadmap = await AsyncStorage.getItem(STORAGE_KEYS.ROADMAP);
+      const hasLocalData = !!(localGoal && localRoadmap);
+      
+      // 6. Create user object with subscription data FIRST (before restoring data)
       // This ensures subscription status is available for the restore function
       let userData: UnifiedUser;
       
       if (!dbUser) {
-        console.warn('[UnifiedUser] ⚠️ No database user found, creating fallback user from Supabase data');
-        // Create fallback user from Supabase data
+        console.warn('[UnifiedUser] ⚠️ No database user found, creating fallback user from Supabase + guest data');
+        // Create fallback user from Supabase data + guest subscription data
         // This allows sign-in to work even if backend is unavailable
         userData = {
           id: authData.user.id,
           email: authData.user.email || email,
           name: authData.user.user_metadata?.name || null,
           username: null,
-          profilePicture: null,
+          profilePicture: guestData.profilePicture || null,
           mode: 'registered',
           isGuest: false,
           createdAt: new Date(),
-          subscriptionPlan: 'free',
-          subscriptionStatus: null,
-          subscriptionExpiresAt: null,
-          subscriptionPurchasedAt: null,
+          // Preserve guest subscription data
+          subscriptionPlan: (guestData.subscriptionPlan || 'free') as any,
+          subscriptionStatus: guestData.subscriptionStatus as any,
+          subscriptionExpiresAt: guestData.subscriptionExpiresAt,
+          subscriptionPurchasedAt: guestData.subscriptionPurchasedAt,
         };
         
         await saveUser(userData);
-        console.log('[UnifiedUser] ✅ Created fallback user from Supabase data');
+        console.log('[UnifiedUser] ✅ Created fallback user from Supabase + guest data');
+        console.log('[UnifiedUser] Subscription preserved:', {
+          plan: userData.subscriptionPlan,
+          status: userData.subscriptionStatus,
+        });
         console.log('[UnifiedUser] ⚠️ Note: Backend may be unavailable - data will sync when backend is available');
+        
+        // If we have local data, preserve it - don't clear
+        if (hasLocalData) {
+          console.log('[UnifiedUser] Local data exists - preserving it, not clearing');
+          // Trigger reload to ensure ambition store has the data
+          triggerAmbitionStoreReload();
+        }
       } else {
-        // Use database user data
+        // Use database user data, but preserve guest subscription if database doesn't have it
         userData = {
           id: dbUser.id || authData.user.id,
           email: dbUser.email || authData.user.email || null,
           name: dbUser.name || null,
           username: dbUser.username || null,
-          profilePicture: dbUser.profilePicture || null,
+          profilePicture: dbUser.profilePicture || guestData.profilePicture || null,
           mode: 'registered',
           isGuest: false,
           createdAt: dbUser.createdAt ? new Date(dbUser.createdAt) : new Date(),
-          subscriptionPlan: (dbUser.subscriptionPlan || 'free') as any,
-          subscriptionStatus: dbUser.subscriptionStatus as any,
-          subscriptionExpiresAt: dbUser.subscriptionExpiresAt ? new Date(dbUser.subscriptionExpiresAt) : null,
-          subscriptionPurchasedAt: dbUser.subscriptionPurchasedAt ? new Date(dbUser.subscriptionPurchasedAt) : null,
+          // Always prefer database subscription data, but fall back to guest data if database doesn't have it
+          subscriptionPlan: (dbUser.subscriptionPlan || guestData.subscriptionPlan || 'free') as any,
+          subscriptionStatus: (dbUser.subscriptionStatus || guestData.subscriptionStatus) as any,
+          subscriptionExpiresAt: dbUser.subscriptionExpiresAt 
+            ? new Date(dbUser.subscriptionExpiresAt) 
+            : guestData.subscriptionExpiresAt,
+          subscriptionPurchasedAt: dbUser.subscriptionPurchasedAt 
+            ? new Date(dbUser.subscriptionPurchasedAt) 
+            : guestData.subscriptionPurchasedAt,
         };
         
-        // 5. Save user data to local storage FIRST (so restore function can check premium status)
+        // 7. Save user data to local storage FIRST (so restore function can check premium status)
         await saveUser(userData);
         console.log('[UnifiedUser] User data saved with subscription:', {
           plan: userData.subscriptionPlan,
@@ -1620,8 +1646,19 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
           isLifetime: userData.subscriptionPlan === 'lifetime',
         });
         
-        // 6. Restore server data to local storage (this will also trigger ambition store reload)
-        // This must happen AFTER user data is saved so premium check works
+        // 8. Check if user is premium
+        const isLifetime = userData.subscriptionPlan === 'lifetime';
+        const isMonthlyOrAnnual = userData.subscriptionPlan === 'monthly' || userData.subscriptionPlan === 'annual';
+        const hasValidExpiration = !userData.subscriptionExpiresAt || userData.subscriptionExpiresAt > new Date();
+        const isPremium = userData.subscriptionPlan && 
+                         userData.subscriptionPlan !== 'free' &&
+                         userData.subscriptionStatus === 'active' &&
+                         (isLifetime || (isMonthlyOrAnnual && hasValidExpiration));
+
+        // 9. Only restore server data if user is premium AND server has data
+        // If server has no data but local has data, preserve local data
+        const serverHasData = !!(dbUser.goal && dbUser.roadmap);
+        
         console.log('[UnifiedUser] About to restore server data, dbUser:', {
           id: dbUser.id,
           email: dbUser.email,
@@ -1632,11 +1669,42 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
           subscriptionStatus: dbUser.subscriptionStatus,
           goalLength: dbUser.goal?.length || 0,
           roadmapLength: dbUser.roadmap?.length || 0,
+          isPremium,
+          serverHasData,
+          hasLocalData,
         });
-        await restoreServerDataToLocal(dbUser);
+        
+        if (isPremium && serverHasData) {
+          console.log('[UnifiedUser] Premium user with server data - restoring from server');
+          // Restore server data (this will also trigger ambition store reload)
+          await restoreServerDataToLocal(dbUser);
+        } else if (isPremium && !serverHasData && hasLocalData) {
+          console.log('[UnifiedUser] Premium user but no server data - preserving local data');
+          // Don't restore, keep local data - it will be synced later
+          // Trigger reload to ensure ambition store has the data
+          triggerAmbitionStoreReload();
+        } else if (!isPremium && hasLocalData) {
+          console.log('[UnifiedUser] Non-premium user with local data - preserving local data');
+          // Non-premium user with local data - preserve it, don't clear
+          // Trigger reload to ensure ambition store has the data
+          triggerAmbitionStoreReload();
+        } else if (isPremium && serverHasData) {
+          // This case is already handled above, but keeping for clarity
+          await restoreServerDataToLocal(dbUser);
+        }
       }
       
-      // 7. Trigger initial sync for premium users to ensure any local changes are synced to database
+      // 10. Only clear guest data if we don't have local roadmap/goal data to preserve
+      // OR if we successfully restored from server
+      if (guestData && !hasLocalData && dbUser && dbUser.goal && dbUser.roadmap) {
+        console.log('[UnifiedUser] Server data restored, clearing guest data');
+        await clearGuestData();
+      } else if (guestData && hasLocalData) {
+        console.log('[UnifiedUser] Local data exists - preserving it, not clearing guest data');
+        // Don't clear - we want to keep the local roadmap/goal
+      }
+      
+      // 11. Trigger initial sync for premium users to ensure any local changes are synced to database
       // This ensures data consistency after sign-in
       const isLifetime = userData.subscriptionPlan === 'lifetime';
       const isMonthlyOrAnnual = userData.subscriptionPlan === 'monthly' || userData.subscriptionPlan === 'annual';
@@ -1757,24 +1825,23 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         console.warn('[UnifiedUser] Error syncing before sign out:', syncError);
       }
 
-      // 2. Clear ONLY user account data from AsyncStorage (NOT roadmap/goal data)
-      // This prevents auth-store from restoring state on restart
-      // CRITICAL: Keep roadmap/goal data so user doesn't lose their progress
+      // 2. Clear ALL data from AsyncStorage (including roadmap/goal data)
+      // When user signs out, they should start fresh as a guest
       // CRITICAL: Clear subscription state - it should be tied to account, not device
-      console.log('[UnifiedUser] Clearing user account data from storage (keeping roadmap/goal, clearing subscription)...');
+      console.log('[UnifiedUser] Clearing all user data from storage (including roadmap/goal)...');
       await Promise.all([
         // Clear unified user data
         AsyncStorage.removeItem(STORAGE_KEYS.USER),
         AsyncStorage.removeItem(STORAGE_KEYS.GUEST_ID),
-        // DO NOT clear roadmap/goal data - user should keep their progress
-        // AsyncStorage.removeItem(STORAGE_KEYS.GOAL),
-        // AsyncStorage.removeItem(STORAGE_KEYS.TIMELINE),
-        // AsyncStorage.removeItem(STORAGE_KEYS.TIME_COMMITMENT),
-        // AsyncStorage.removeItem(STORAGE_KEYS.ANSWERS),
-        // AsyncStorage.removeItem(STORAGE_KEYS.ROADMAP),
-        // AsyncStorage.removeItem(STORAGE_KEYS.COMPLETED_TASKS),
-        // AsyncStorage.removeItem(STORAGE_KEYS.STREAK_DATA),
-        // AsyncStorage.removeItem(STORAGE_KEYS.TASK_TIMERS),
+        // Clear roadmap/goal data - user signs out to start fresh
+        AsyncStorage.removeItem(STORAGE_KEYS.GOAL),
+        AsyncStorage.removeItem(STORAGE_KEYS.TIMELINE),
+        AsyncStorage.removeItem(STORAGE_KEYS.TIME_COMMITMENT),
+        AsyncStorage.removeItem(STORAGE_KEYS.ANSWERS),
+        AsyncStorage.removeItem(STORAGE_KEYS.ROADMAP),
+        AsyncStorage.removeItem(STORAGE_KEYS.COMPLETED_TASKS),
+        AsyncStorage.removeItem(STORAGE_KEYS.STREAK_DATA),
+        AsyncStorage.removeItem(STORAGE_KEYS.TASK_TIMERS),
         // Clear subscription state - subscription is tied to account, not device
         AsyncStorage.removeItem('ambitionly_subscription_state'),
         // Clear auth tokens from auth-store
@@ -1873,10 +1940,9 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       setUserInternal(guestUser);
       await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(guestUser));
       
-      // 7. DO NOT clear ambition store in-memory state - keep roadmap/goal data
-      // The user should keep their roadmap when signing out
-      // DeviceEventEmitter.emit('ambition-clear-all'); // REMOVED - don't clear roadmap
-      console.log('[UnifiedUser] Keeping roadmap/goal data - not clearing ambition store');
+      // 7. Clear ambition store in-memory state - user signs out to start fresh
+      DeviceEventEmitter.emit('ambition-clear-all');
+      console.log('[UnifiedUser] Clearing roadmap/goal data from ambition store');
       
       // 8. Clear subscription store state - subscription is tied to account
       const { DeviceEventEmitter } = require('react-native');
@@ -2010,9 +2076,11 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         plan: userData.subscriptionPlan,
         status: userData.subscriptionStatus,
         hasPremium,
+        expiresAt: userData.subscriptionExpiresAt,
+        purchasedAt: userData.subscriptionPurchasedAt,
       });
       
-      await updateUserMutation.mutateAsync({
+      const syncPayload = {
         email: userData.email!,
         name: userData.name || undefined,
         username: userData.username || undefined,
@@ -2022,11 +2090,45 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         subscriptionStatus: userData.subscriptionStatus,
         subscriptionExpiresAt: userData.subscriptionExpiresAt?.toISOString(),
         subscriptionPurchasedAt: userData.subscriptionPurchasedAt?.toISOString(),
+      };
+      
+      console.log('[UnifiedUser] Sync payload:', {
+        email: syncPayload.email,
+        hasName: !!syncPayload.name,
+        subscriptionPlan: syncPayload.subscriptionPlan,
+        subscriptionStatus: syncPayload.subscriptionStatus,
       });
       
-      console.log('[UnifiedUser] ✅ Subscription data synced to database');
+      const result = await updateUserMutation.mutateAsync(syncPayload);
+      
+      console.log('[UnifiedUser] ✅ Subscription data synced to database:', {
+        success: result.success,
+        userId: result.user?.id,
+        email: result.user?.email,
+        updatedAt: result.user?.updatedAt,
+      });
     } catch (error) {
-      console.error('[UnifiedUser] Database sync error:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      
+      console.error('[UnifiedUser] ❌ Database sync error:', {
+        message: errorMessage,
+        stack: errorStack,
+        error: error,
+        email: userData.email,
+      });
+      
+      // Log more details about the error
+      if (errorMessage.includes('Network') || errorMessage.includes('fetch') || errorMessage.includes('Failed to fetch')) {
+        console.error('[UnifiedUser] Network error - backend may be unreachable');
+      } else if (errorMessage.includes('JSON') || errorMessage.includes('parse')) {
+        console.error('[UnifiedUser] JSON parsing error - backend may have returned invalid response');
+      } else if (errorMessage.includes('User not found') || errorMessage.includes('not found')) {
+        console.error('[UnifiedUser] User not found in database - user may need to be created first');
+      } else {
+        console.error('[UnifiedUser] Unknown sync error - check backend logs');
+      }
+      
       // Don't throw - local data is still saved
     }
   };

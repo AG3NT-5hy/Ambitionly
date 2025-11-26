@@ -79,13 +79,41 @@ export const updateUserProcedure = protectedProcedure
         updateData.revenueCatCustomerInfo = input.revenueCatCustomerInfo;
       }
       
+      // Check if user exists first
+      const existingUser = await db.user.findUnique({
+        where: userId ? { id: userId } : { email: input.email! },
+      });
+      
+      if (!existingUser) {
+        console.error('[User.Update] ❌ User not found:', userId || input.email);
+        throw new Error(`User not found: ${userId || input.email}`);
+      }
+      
+      console.log('[User.Update] Found user, updating:', {
+        userId: existingUser.id,
+        email: existingUser.email,
+        updateFields: Object.keys(updateData),
+        hasGoal: !!updateData.goal,
+        hasRoadmap: !!updateData.roadmap,
+        goalLength: updateData.goal?.length || 0,
+        roadmapLength: updateData.roadmap?.length || 0,
+      });
+      
       // Update user
       const user = await db.user.update({
-        where: userId ? { id: userId } : { email: input.email },
+        where: userId ? { id: userId } : { email: input.email! },
         data: updateData,
       });
       
-      console.log('[User.Update] ✅ User updated:', user.id);
+      console.log('[User.Update] ✅ User updated successfully:', {
+        userId: user.id,
+        email: user.email,
+        updatedAt: user.updatedAt,
+        hasGoal: !!user.goal,
+        hasRoadmap: !!user.roadmap,
+        goalLength: user.goal?.length || 0,
+        roadmapLength: user.roadmap?.length || 0,
+      });
       
       return {
         success: true,
