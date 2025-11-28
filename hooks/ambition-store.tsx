@@ -129,7 +129,9 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     }
   };
   
-  // Sync ambition data to database (only for premium users)
+  // Sync ambition data to database (ONLY for premium users)
+  // CRITICAL: Roadmap/goal data is ONLY saved to database if user has premium subscription
+  // Non-premium users' data stays local only
   const syncAmbitionDataToDatabase = useCallback(async () => {
     // Prevent concurrent syncs
     if (syncInProgressRef.current) {
@@ -152,8 +154,11 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         return;
       }
       
+      // CRITICAL: Only sync roadmap/goal data if user has premium subscription
+      // This ensures free users' data stays local only
       if (!userSession.hasPremium) {
         console.log('[Ambition] ⚠️ User does not have premium subscription, skipping cloud sync');
+        console.log('[Ambition] Note: Roadmap/goal data is NOT saved to database for free users');
         console.log('[Ambition] Note: Subscription data is synced separately via unified-user-store');
         return;
       }

@@ -6,7 +6,7 @@
 import createContextHook from '@nkzw/create-context-hook';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { AppState, AppStateStatus } from 'react-native';
+import { AppState, AppStateStatus, DeviceEventEmitter } from 'react-native';
 import Purchases from 'react-native-purchases';
 import { supabase } from './supabase';
 import { signInWithGoogleNative } from './google-signin-native';
@@ -476,27 +476,28 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
                          userData.subscriptionStatus === 'active' &&
                          (isLifetime || (isMonthlyOrAnnual && hasValidExpiration));
 
-        // Only restore server data if user is premium AND server has data
-        // If server has no data but local has data, preserve local data
-        const serverHasData = !!(dbUser.goal && dbUser.roadmap);
+        // CRITICAL: Always restore server data if it exists, regardless of premium status
+        // Premium check only applies to SYNCING (uploading), not RESTORING (downloading)
+        const serverHasData = !!(dbUser.goal || dbUser.roadmap);
         
-        if (isPremium && serverHasData) {
-          console.log('[UnifiedUser] Premium user with server data - restoring from server');
+        if (serverHasData) {
+          console.log('[UnifiedUser] Server has data - restoring from server (regardless of premium status)');
           // Restore server data (this will preserve local data if server doesn't have it)
           await restoreServerDataToLocal(dbUser);
           // Trigger reload to pick up restored data
           triggerAmbitionStoreReload();
-        } else if (isPremium && !serverHasData && hasLocalData) {
-          console.log('[UnifiedUser] Premium user but no server data - preserving local data');
-          // Don't restore, keep local data - it will be synced later
+        } else if (hasLocalData) {
+          console.log('[UnifiedUser] No server data but local data exists - preserving local data');
+          // Don't restore, keep local data - it will be synced later if user is premium
           // Don't clear guest data yet - we want to keep the local roadmap
           // Trigger reload to ensure ambition store has the data
           triggerAmbitionStoreReload();
-        } else if (!isPremium && hasLocalData) {
-          console.log('[UnifiedUser] Non-premium user with local data - preserving local data');
-          // Non-premium user with local data - preserve it, don't clear
-          // Trigger reload to ensure ambition store has the data
-          triggerAmbitionStoreReload();
+          // Still restore subscription data even if no roadmap data
+          await restoreServerDataToLocal(dbUser);
+        } else {
+          console.log('[UnifiedUser] No server data and no local data - user will start fresh');
+          // Still restore subscription data even if no roadmap data
+          await restoreServerDataToLocal(dbUser);
         }
         
         // Trigger initial sync for premium users to ensure any local changes are synced to database
@@ -504,7 +505,6 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
           console.log('[UnifiedUser] Premium user detected (Google), triggering initial data sync...');
           setTimeout(() => {
             try {
-              const { DeviceEventEmitter } = require('react-native');
               DeviceEventEmitter.emit('ambition-sync-trigger');
               console.log('[UnifiedUser] ✅ Emitted sync event for premium user (Google)');
             } catch (e) {
@@ -865,7 +865,6 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
   const triggerAmbitionStoreReload = () => {
     setTimeout(() => {
       try {
-        const { DeviceEventEmitter } = require('react-native');
         DeviceEventEmitter.emit('ambition-storage-reload');
         console.log('[UnifiedUser] ✅ Triggered ambition store reload');
       } catch (e) {
@@ -889,25 +888,28 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
                         dbUser.subscriptionStatus === 'active' &&
                         (isLifetime || (isMonthlyOrAnnual && hasValidExpiration));
       
-      // Only restore data for premium users
-      if (!hasPremium) {
-        console.log('[UnifiedUser] User does not have premium subscription, skipping cloud data restoration', {
+      // CRITICAL: Always restore roadmap/goal data if it exists in the database, regardless of premium status
+      // The premium check should only apply to SYNCING (uploading), not RESTORING (downloading)
+      // Users may have created roadmaps when they were premium, and should still see them even if subscription expired
+      const hasServerData = !!(dbUser.goal || dbUser.roadmap);
+      
+      if (!hasServerData) {
+        console.log('[UnifiedUser] No server data to restore', {
+          hasGoal: !!dbUser.goal,
+          hasRoadmap: !!dbUser.roadmap,
+        });
+        // Still restore subscription data even if no roadmap data
+        // (subscription restoration is handled below)
+      } else {
+        console.log('[UnifiedUser] Restoring server data to local storage...', {
+          hasPremium,
           plan: dbUser.subscriptionPlan,
           status: dbUser.subscriptionStatus,
-          expiresAt: dbUser.subscriptionExpiresAt,
           isLifetime,
+          hasGoal: !!dbUser.goal,
+          hasRoadmap: !!dbUser.roadmap,
         });
-        return;
       }
-      
-      console.log('[UnifiedUser] Restoring server data to local storage (premium user)...', {
-        hasPremium,
-        plan: dbUser.subscriptionPlan,
-        status: dbUser.subscriptionStatus,
-        isLifetime,
-        hasGoal: !!dbUser.goal,
-        hasRoadmap: !!dbUser.roadmap,
-      });
       
       // Check for active task timers locally before restoring
       const localTaskTimersStr = await AsyncStorage.getItem(STORAGE_KEYS.TASK_TIMERS);
@@ -1056,11 +1058,12 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         preservedActiveTimers: hasActiveLocalTimer,
       });
       
-      // Restore subscription data to subscription store if user has premium
-      if (hasPremium && dbUser.subscriptionPlan) {
+      // CRITICAL: Always restore subscription data from database (it's account-level data)
+      // Subscription data should be restored regardless of premium status
+      if (dbUser.subscriptionPlan !== undefined || dbUser.subscriptionStatus !== undefined) {
         try {
           const subscriptionState = {
-            plan: dbUser.subscriptionPlan as 'free' | 'monthly' | 'annual' | 'lifetime',
+            plan: (dbUser.subscriptionPlan || 'free') as 'free' | 'monthly' | 'annual' | 'lifetime',
             isActive: dbUser.subscriptionStatus === 'active',
             expiresAt: dbUser.subscriptionExpiresAt ? new Date(dbUser.subscriptionExpiresAt) : undefined,
             purchasedAt: dbUser.subscriptionPurchasedAt ? new Date(dbUser.subscriptionPurchasedAt) : undefined,
@@ -1070,8 +1073,22 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
           await AsyncStorage.setItem('ambitionly_subscription_state', JSON.stringify(subscriptionState));
           
           // Trigger subscription store reload
-          const { DeviceEventEmitter } = require('react-native');
           DeviceEventEmitter.emit('subscription-restore', subscriptionState);
+          
+          // Also update unified user store with subscription data from database
+          const currentUser = user;
+          if (currentUser && !currentUser.isGuest) {
+            const updatedUser: UnifiedUser = {
+              ...currentUser,
+              subscriptionPlan: subscriptionState.plan as any,
+              subscriptionStatus: subscriptionState.isActive ? 'active' : (dbUser.subscriptionStatus as any || null),
+              subscriptionExpiresAt: subscriptionState.expiresAt || null,
+              subscriptionPurchasedAt: subscriptionState.purchasedAt || null,
+            };
+            await saveUser(updatedUser);
+            setUserInternal(updatedUser);
+            console.log('[UnifiedUser] ✅ Updated unified user store with subscription data from database');
+          }
           
           console.log('[UnifiedUser] ✅ Subscription data restored from database:', {
             plan: subscriptionState.plan,
@@ -1655,9 +1672,9 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
                          userData.subscriptionStatus === 'active' &&
                          (isLifetime || (isMonthlyOrAnnual && hasValidExpiration));
 
-        // 9. Only restore server data if user is premium AND server has data
-        // If server has no data but local has data, preserve local data
-        const serverHasData = !!(dbUser.goal && dbUser.roadmap);
+        // 9. CRITICAL: Always restore server data if it exists, regardless of premium status
+        // Premium check only applies to SYNCING (uploading), not RESTORING (downloading)
+        const serverHasData = !!(dbUser.goal || dbUser.roadmap);
         
         console.log('[UnifiedUser] About to restore server data, dbUser:', {
           id: dbUser.id,
@@ -1674,22 +1691,20 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
           hasLocalData,
         });
         
-        if (isPremium && serverHasData) {
-          console.log('[UnifiedUser] Premium user with server data - restoring from server');
-          // Restore server data (this will also trigger ambition store reload)
+        // CRITICAL: Always restore server data if it exists, regardless of premium status
+        // Premium check only applies to SYNCING (uploading), not RESTORING (downloading)
+        if (serverHasData) {
+          console.log('[UnifiedUser] Server has data - restoring from server (regardless of premium status)');
+          // Restore server data (this will also trigger ambition store reload and subscription restore)
           await restoreServerDataToLocal(dbUser);
-        } else if (isPremium && !serverHasData && hasLocalData) {
-          console.log('[UnifiedUser] Premium user but no server data - preserving local data');
-          // Don't restore, keep local data - it will be synced later
+        } else if (hasLocalData) {
+          console.log('[UnifiedUser] No server data but local data exists - preserving local data');
+          // Don't restore, keep local data - it will be synced later if user is premium
           // Trigger reload to ensure ambition store has the data
           triggerAmbitionStoreReload();
-        } else if (!isPremium && hasLocalData) {
-          console.log('[UnifiedUser] Non-premium user with local data - preserving local data');
-          // Non-premium user with local data - preserve it, don't clear
-          // Trigger reload to ensure ambition store has the data
-          triggerAmbitionStoreReload();
-        } else if (isPremium && serverHasData) {
-          // This case is already handled above, but keeping for clarity
+        } else {
+          console.log('[UnifiedUser] No server data and no local data - user will start fresh');
+          // Still restore subscription data even if no roadmap data
           await restoreServerDataToLocal(dbUser);
         }
       }
@@ -1719,7 +1734,6 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         // Wait a bit for ambition store to reload, then trigger sync
         setTimeout(() => {
           try {
-            const { DeviceEventEmitter } = require('react-native');
             DeviceEventEmitter.emit('ambition-sync-trigger');
             console.log('[UnifiedUser] ✅ Emitted sync event for premium user');
           } catch (e) {
@@ -1945,7 +1959,6 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       console.log('[UnifiedUser] Clearing roadmap/goal data from ambition store');
       
       // 8. Clear subscription store state - subscription is tied to account
-      const { DeviceEventEmitter } = require('react-native');
       DeviceEventEmitter.emit('subscription-clear');
       console.log('[UnifiedUser] Emitted subscription-clear event');
       
@@ -2043,7 +2056,6 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       // Use event emitter to trigger sync in ambition store
       setTimeout(() => {
         try {
-          const { DeviceEventEmitter } = require('react-native');
           DeviceEventEmitter.emit('ambition-sync-trigger');
           console.log('[UnifiedUser] ✅ Triggered ambition data sync');
         } catch (error) {
@@ -2056,13 +2068,15 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
   }, [user]);
 
   // Sync user data to database
+  // CRITICAL: This function ONLY syncs subscription and profile data, NOT roadmap/goal data
+  // Roadmap/goal data is synced separately via ambition-store.tsx and ONLY for premium users
   const syncToDatabase = async (userData: UnifiedUser) => {
     if (userData.isGuest) {
       console.log('[UnifiedUser] Skipping database sync for guest user');
       return;
     }
     
-    // Check if user has premium subscription (for roadmap data sync)
+    // Check if user has premium subscription (for reference only - not used for sync decision)
     const hasPremium = userData.subscriptionPlan && 
                       userData.subscriptionPlan !== 'free' &&
                       userData.subscriptionStatus === 'active' &&
@@ -2070,8 +2084,10 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
     
     // CRITICAL: Always sync subscription data to database, regardless of premium status
     // This ensures subscription status is tied to account, not device
+    // NOTE: We do NOT sync roadmap/goal data here - that's handled by ambition-store.tsx
+    // and ONLY for premium users
     try {
-      console.log('[UnifiedUser] Syncing subscription data to database:', {
+      console.log('[UnifiedUser] Syncing subscription data to database (NOT roadmap data):', {
         email: userData.email,
         plan: userData.subscriptionPlan,
         status: userData.subscriptionStatus,
@@ -2090,6 +2106,8 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         subscriptionStatus: userData.subscriptionStatus,
         subscriptionExpiresAt: userData.subscriptionExpiresAt?.toISOString(),
         subscriptionPurchasedAt: userData.subscriptionPurchasedAt?.toISOString(),
+        // CRITICAL: Do NOT include roadmap/goal data here - that's synced separately
+        // via ambition-store.tsx and ONLY for premium users
       };
       
       console.log('[UnifiedUser] Sync payload:', {
