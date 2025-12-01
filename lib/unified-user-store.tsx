@@ -136,12 +136,18 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const hasLoadedRef = useRef(false);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const userRef = useRef<UnifiedUser | null>(null);
 
   // Use tRPC hooks for mutations
   const signupMutation = trpc.auth.signup.useMutation();
   const confirmSupabaseUserMutation = trpc.auth.confirmSupabaseUser.useMutation();
   const createUserMutation = trpc.user.create.useMutation();
   const updateUserMutation = trpc.user.update.useMutation();
+
+  // Keep userRef in sync with user state
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   // Monitor AppState to prevent operations when app is in background
   useEffect(() => {
@@ -251,10 +257,63 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       }
     });
     
+    // Listen for subscription updates from RevenueCat/subscription store
+    const subscriptionUpdateListener = DeviceEventEmitter.addListener('subscription-updated', async (subscriptionState: {
+      plan: 'free' | 'monthly' | 'annual' | 'lifetime';
+      isActive: boolean;
+      expiresAt?: Date;
+      purchasedAt?: Date;
+    }) => {
+      // Get latest user from ref (updated below)
+      const currentUser = userRef.current;
+      if (!currentUser || currentUser.isGuest) {
+        console.log('[UnifiedUser] Skipping subscription sync - user is guest or not available');
+        return;
+      }
+
+      console.log('[UnifiedUser] Subscription updated from RevenueCat, syncing to database...', {
+        plan: subscriptionState.plan,
+        isActive: subscriptionState.isActive,
+      });
+
+      try {
+        // Update unified user with subscription data
+        const updatedUser: UnifiedUser = {
+          ...currentUser,
+          subscriptionPlan: subscriptionState.plan,
+          subscriptionStatus: subscriptionState.isActive ? 'active' : null,
+          subscriptionExpiresAt: subscriptionState.expiresAt ? new Date(subscriptionState.expiresAt) : null,
+          subscriptionPurchasedAt: subscriptionState.purchasedAt ? new Date(subscriptionState.purchasedAt) : null,
+        };
+        
+        // Save to AsyncStorage
+        await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(updatedUser));
+        userRef.current = updatedUser;
+        setUserInternal(updatedUser);
+        
+        // Sync to database
+        if (!currentUser.isGuest && currentUser.email) {
+          const syncPayload = {
+            email: currentUser.email,
+            subscriptionPlan: subscriptionState.plan,
+            subscriptionStatus: subscriptionState.isActive ? 'active' : null,
+            subscriptionExpiresAt: subscriptionState.expiresAt ? new Date(subscriptionState.expiresAt).toISOString() : null,
+            subscriptionPurchasedAt: subscriptionState.purchasedAt ? new Date(subscriptionState.purchasedAt).toISOString() : null,
+          };
+          
+          const result = await updateUserMutation.mutateAsync(syncPayload);
+          console.log('[UnifiedUser] ✅ Subscription synced to database:', result);
+        }
+      } catch (error) {
+        console.error('[UnifiedUser] Failed to sync subscription to database:', error);
+      }
+    });
+
     return () => {
       subscription.unsubscribe();
+      subscriptionUpdateListener.remove();
     };
-  }, []);
+  }, []); // Empty deps - we use userRef.current inside the listener
 
   const signInWithGoogle = useCallback(async (): Promise<boolean> => {
     setIsAuthenticating(true);

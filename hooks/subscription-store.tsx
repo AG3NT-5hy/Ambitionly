@@ -67,6 +67,9 @@ export const [SubscriptionProvider, useSubscription] = createContextHook(() => {
         await AsyncStorage.setItem(STORAGE_KEYS.SUBSCRIPTION_STATE, JSON.stringify(newState));
         setSubscriptionStateInternal(newState);
         
+        // Emit event to notify unified user store to sync subscription to database
+        const { DeviceEventEmitter } = require('react-native');
+        DeviceEventEmitter.emit('subscription-updated', newState);
         console.log('[Subscription] ✅ Active subscription found:', plan);
         return true;
       } else {
@@ -202,6 +205,14 @@ export const [SubscriptionProvider, useSubscription] = createContextHook(() => {
     
     setSubscriptionStateInternal(newState);
     await AsyncStorage.setItem(STORAGE_KEYS.SUBSCRIPTION_STATE, JSON.stringify(newState));
+    
+    // Emit event to notify unified user store to sync subscription to database
+    // Only emit if subscription is active (not free)
+    if (newState.isActive && newState.plan !== 'free') {
+      const { DeviceEventEmitter } = require('react-native');
+      DeviceEventEmitter.emit('subscription-updated', newState);
+      console.log('[Subscription] Emitted subscription-updated event for active subscription');
+    }
   }, []);
 
   const getPlanPrice = useCallback((plan: SubscriptionPlan): number => {
