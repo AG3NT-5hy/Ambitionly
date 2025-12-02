@@ -276,6 +276,19 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         isActive: subscriptionState.isActive,
       });
 
+      // Check if user just became premium (was free/guest, now has active premium subscription)
+      const wasPremium = currentUser.subscriptionPlan && 
+                        currentUser.subscriptionPlan !== 'free' &&
+                        currentUser.subscriptionStatus === 'active';
+      const isLifetime = subscriptionState.plan === 'lifetime';
+      const isMonthlyOrAnnual = subscriptionState.plan === 'monthly' || subscriptionState.plan === 'annual';
+      const hasValidExpiration = !subscriptionState.expiresAt || subscriptionState.expiresAt > new Date();
+      const isNowPremium = subscriptionState.plan && 
+                           subscriptionState.plan !== 'free' &&
+                           subscriptionState.isActive &&
+                           (isLifetime || (isMonthlyOrAnnual && hasValidExpiration));
+      const justBecamePremium = !wasPremium && isNowPremium;
+
       try {
         // Update unified user with subscription data
         const updatedUser: UnifiedUser = {
@@ -291,7 +304,7 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         userRef.current = updatedUser;
         setUserInternal(updatedUser);
         
-        // Sync to database
+        // Sync subscription data to database
         if (!currentUser.isGuest && currentUser.email) {
           const syncPayload = {
             email: currentUser.email,
@@ -303,6 +316,30 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
           
           const result = await updateUserMutation.mutateAsync(syncPayload);
           console.log('[UnifiedUser] ✅ Subscription synced to database:', result);
+        }
+
+        // CRITICAL: If user just became premium, trigger sync of existing local roadmap data
+        // This ensures that when a guest user upgrades to premium, their existing local data gets synced to the database
+        if (justBecamePremium) {
+          console.log('[UnifiedUser] 🎉 User just became premium! Triggering sync of existing local roadmap data...');
+          console.log('[UnifiedUser] Previous subscription:', {
+            plan: currentUser.subscriptionPlan,
+            status: currentUser.subscriptionStatus,
+          });
+          console.log('[UnifiedUser] New subscription:', {
+            plan: subscriptionState.plan,
+            isActive: subscriptionState.isActive,
+          });
+          
+          // Emit event to trigger ambition store to sync existing local data
+          setTimeout(() => {
+            try {
+              DeviceEventEmitter.emit('ambition-sync-trigger');
+              console.log('[UnifiedUser] ✅ Emitted ambition-sync-trigger event to sync existing local roadmap data');
+            } catch (e) {
+              console.warn('[UnifiedUser] Could not emit ambition-sync-trigger event:', e);
+            }
+          }, 1000); // Small delay to ensure user state is fully updated
         }
       } catch (error) {
         console.error('[UnifiedUser] Failed to sync subscription to database:', error);
@@ -497,7 +534,7 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         // Only use guest data for subscription if database doesn't have it and we just created the user
         const userData: UnifiedUser = {
           id: dbUser.id || authUser.id,
-          email: dbUser.email || email,
+          email: email || dbUser.email || authUser.email, // CRITICAL: Prioritize email from current Google sign-in (source of truth)
           name: dbUser.name || authUser.user_metadata?.name || null,
           username: dbUser.username || null,
           profilePicture: createdUser && guestData 
@@ -517,9 +554,17 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
             : (createdUser && guestData ? guestData.subscriptionPurchasedAt : null),
         };
 
+        // CRITICAL: Clear old user data first to prevent showing stale email
+        console.log('[UnifiedUser] Clearing old user data before saving new user (Google):', {
+          oldEmail: user?.email,
+          newEmail: userData.email,
+        });
+        setUserInternal(null); // Clear state first
+        
         // Save user data FIRST (so restore function can check premium status)
         await saveUser(userData);
         console.log('[UnifiedUser] User data saved with subscription (Google):', {
+          email: userData.email,
           plan: userData.subscriptionPlan,
           status: userData.subscriptionStatus,
           expiresAt: userData.subscriptionExpiresAt,
@@ -1695,7 +1740,7 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         // Use database user data, but preserve guest subscription if database doesn't have it
         userData = {
           id: dbUser.id || authData.user.id,
-          email: dbUser.email || authData.user.email || null,
+          email: authData.user.email || dbUser.email || email || null, // CRITICAL: Prioritize email from current sign-in (source of truth)
           name: dbUser.name || null,
           username: dbUser.username || null,
           profilePicture: dbUser.profilePicture || guestData.profilePicture || null,
@@ -1713,9 +1758,17 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
             : guestData.subscriptionPurchasedAt,
         };
         
+        // CRITICAL: Clear old user data first to prevent showing stale email
+        console.log('[UnifiedUser] Clearing old user data before saving new user (sign-in):', {
+          oldEmail: user?.email,
+          newEmail: userData.email,
+        });
+        setUserInternal(null); // Clear state first
+        
         // 7. Save user data to local storage FIRST (so restore function can check premium status)
         await saveUser(userData);
         console.log('[UnifiedUser] User data saved with subscription:', {
+          email: userData.email,
           plan: userData.subscriptionPlan,
           status: userData.subscriptionStatus,
           expiresAt: userData.subscriptionExpiresAt,
