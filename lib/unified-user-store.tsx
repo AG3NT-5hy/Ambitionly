@@ -332,14 +332,51 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
           });
           
           // Emit event to trigger ambition store to sync existing local data
-          setTimeout(() => {
+          // Use longer delay and multiple retries to ensure AsyncStorage is fully updated
+          const triggerSync = async (attempt: number = 1) => {
             try {
-              DeviceEventEmitter.emit('ambition-sync-trigger');
-              console.log('[UnifiedUser] ✅ Emitted ambition-sync-trigger event to sync existing local roadmap data');
+              // Wait longer to ensure AsyncStorage write is complete
+              await new Promise(resolve => setTimeout(resolve, attempt === 1 ? 2000 : 1000));
+              
+              // Verify the user state is saved before triggering sync
+              const { STORAGE_KEYS } = await import('../constants');
+              const storedUser = await AsyncStorage.getItem(STORAGE_KEYS.USER);
+              if (storedUser) {
+                const userData = JSON.parse(storedUser);
+                const isLifetime = userData.subscriptionPlan === 'lifetime';
+                const isMonthlyOrAnnual = userData.subscriptionPlan === 'monthly' || userData.subscriptionPlan === 'annual';
+                const hasValidExpiration = !userData.subscriptionExpiresAt || new Date(userData.subscriptionExpiresAt) > new Date();
+                const hasPremium = userData.subscriptionPlan && 
+                                 userData.subscriptionPlan !== 'free' &&
+                                 userData.subscriptionStatus === 'active' &&
+                                 (isLifetime || (isMonthlyOrAnnual && hasValidExpiration));
+                
+                if (hasPremium || attempt >= 3) {
+                  // User is premium or we've tried 3 times, trigger sync
+                  DeviceEventEmitter.emit('ambition-sync-trigger', { forceSync: true, isPremium: hasPremium });
+                  console.log('[UnifiedUser] ✅ Emitted ambition-sync-trigger event (attempt', attempt, ') to sync existing local roadmap data');
+                } else {
+                  // Premium status not yet saved, retry
+                  console.log('[UnifiedUser] Premium status not yet saved, retrying sync trigger (attempt', attempt, ')...');
+                  if (attempt < 3) {
+                    triggerSync(attempt + 1);
+                  }
+                }
+              } else {
+                console.warn('[UnifiedUser] User data not found in storage, cannot verify premium status');
+                // Still trigger sync - the ambition store will check again
+                DeviceEventEmitter.emit('ambition-sync-trigger', { forceSync: true });
+              }
             } catch (e) {
               console.warn('[UnifiedUser] Could not emit ambition-sync-trigger event:', e);
+              // Retry if we haven't tried 3 times yet
+              if (attempt < 3) {
+                triggerSync(attempt + 1);
+              }
             }
-          }, 1000); // Small delay to ensure user state is fully updated
+          };
+          
+          triggerSync(1);
         }
       } catch (error) {
         console.error('[UnifiedUser] Failed to sync subscription to database:', error);

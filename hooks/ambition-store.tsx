@@ -132,15 +132,15 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
   // Sync ambition data to database (ONLY for premium users)
   // CRITICAL: Roadmap/goal data is ONLY saved to database if user has premium subscription
   // Non-premium users' data stays local only
-  const syncAmbitionDataToDatabase = useCallback(async () => {
-    // Prevent concurrent syncs
-    if (syncInProgressRef.current) {
+  const syncAmbitionDataToDatabase = useCallback(async (forceSync: boolean = false, isPremiumFromEvent: boolean | undefined = undefined, retryCount: number = 0) => {
+    // Prevent concurrent syncs (unless forced and retrying)
+    if (syncInProgressRef.current && !(forceSync && retryCount > 0)) {
       console.log('[Ambition] Sync already in progress, skipping');
       return;
     }
     
     try {
-      console.log('[Ambition] 🔄 Starting sync to database...');
+      console.log('[Ambition] 🔄 Starting sync to database...', { forceSync, isPremiumFromEvent, retryCount });
       const userSession = await checkUserSession();
       
       console.log('[Ambition] User session check result:', {
@@ -156,7 +156,19 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
       
       // CRITICAL: Only sync roadmap/goal data if user has premium subscription
       // This ensures free users' data stays local only
-      if (!userSession.hasPremium) {
+      // If forceSync is true and we have premium status from event, use that instead of checking
+      const hasPremium = isPremiumFromEvent !== undefined ? isPremiumFromEvent : userSession.hasPremium;
+      
+      if (!hasPremium) {
+        // If forceSync is true, retry after a delay (AsyncStorage might not be updated yet)
+        if (forceSync && retryCount < 3) {
+          console.log('[Ambition] ⚠️ Premium check failed but forceSync=true, retrying after delay (attempt', retryCount + 1, ')...');
+          setTimeout(() => {
+            syncAmbitionDataToDatabase(forceSync, isPremiumFromEvent, retryCount + 1);
+          }, 1500); // Wait 1.5 seconds before retry
+          return;
+        }
+        
         console.log('[Ambition] ⚠️ User does not have premium subscription, skipping cloud sync');
         console.log('[Ambition] Note: Roadmap/goal data is NOT saved to database for free users');
         console.log('[Ambition] Note: Subscription data is synced separately via unified-user-store');
@@ -438,9 +450,10 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     const clearSubscription = DeviceEventEmitter.addListener('ambition-clear-all', handleClearAll);
     
     // Listen for premium upgrade trigger to sync data
-    const syncTriggerHandler = () => {
-      console.log('[Ambition] Received premium upgrade trigger, syncing data...');
-      syncAmbitionDataToDatabase();
+    const syncTriggerHandler = (eventData?: { forceSync?: boolean; isPremium?: boolean }) => {
+      console.log('[Ambition] Received premium upgrade trigger, syncing data...', eventData);
+      // If forceSync is true, we'll retry even if premium check initially fails
+      syncAmbitionDataToDatabase(eventData?.forceSync, eventData?.isPremium);
     };
     const syncSubscription = DeviceEventEmitter.addListener('ambition-sync-trigger', syncTriggerHandler);
     
@@ -1127,14 +1140,14 @@ Output ONLY valid JSON in this exact format:
     let notificationId: string | null = null;
     if (durationInSeconds >= 5 && !isNaN(durationInSeconds) && isFinite(durationInSeconds)) {
       try {
-        console.log(`[Timer] Scheduling notification for ${durationInSeconds} seconds (${duration} minutes)`);
+      console.log(`[Timer] Scheduling notification for ${durationInSeconds} seconds (${duration} minutes)`);
         console.log(`[Timer] Timer start time: ${startTime}, expected completion: ${startTime + (durationInSeconds * 1000)}`);
-        notificationId = await NotificationService.scheduleTaskCompleteNotification(taskTitle, durationInSeconds, taskId);
-        if (notificationId) {
-          console.log(`[Timer] ✅ Notification scheduled successfully with ID: ${notificationId}`);
+      notificationId = await NotificationService.scheduleTaskCompleteNotification(taskTitle, durationInSeconds, taskId);
+      if (notificationId) {
+        console.log(`[Timer] ✅ Notification scheduled successfully with ID: ${notificationId}`);
           console.log(`[Timer] Notification should fire in ${durationInSeconds} seconds (${duration} minutes)`);
-        } else {
-          console.warn(`[Timer] ⚠️ Failed to schedule notification - fallback will be used when timer completes`);
+      } else {
+        console.warn(`[Timer] ⚠️ Failed to schedule notification - fallback will be used when timer completes`);
         }
       } catch (notificationError) {
         console.error(`[Timer] Error scheduling notification:`, notificationError);
@@ -1163,7 +1176,7 @@ Output ONLY valid JSON in this exact format:
     
     // Save to storage (timer is already in memory, so continue even if storage fails)
     try {
-      await AsyncStorage.setItem(STORAGE_KEYS.TASK_TIMERS, JSON.stringify(updatedTimers));
+    await AsyncStorage.setItem(STORAGE_KEYS.TASK_TIMERS, JSON.stringify(updatedTimers));
       console.log(`[Timer] Timer saved to storage successfully`);
     } catch (storageError) {
       console.error(`[Timer] Error saving timer to storage:`, storageError);
@@ -1178,7 +1191,7 @@ Output ONLY valid JSON in this exact format:
     
     // Sync to database (don't fail timer start if sync fails)
     try {
-      await syncAmbitionDataToDatabase();
+    await syncAmbitionDataToDatabase();
     } catch (syncError) {
       console.error(`[Timer] Error syncing timer to database:`, syncError);
       console.warn(`[Timer] ⚠️ Timer started successfully but database sync failed - timer will continue to work locally`);
