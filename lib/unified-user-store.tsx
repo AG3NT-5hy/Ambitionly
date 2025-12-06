@@ -641,17 +641,22 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
           await restoreServerDataToLocal(dbUser);
         }
         
-        // Trigger initial sync for premium users to ensure any local changes are synced to database
-        if (isPremium) {
-          console.log('[UnifiedUser] Premium user detected (Google), triggering initial data sync...');
+        // Trigger initial sync for premium users ONLY if we have local data that might differ from server
+        // Don't sync immediately after restore - wait for store to hydrate and only sync if we have local changes
+        if (isPremium && hasLocalData && !serverHasData) {
+          console.log('[UnifiedUser] Premium user with local data (no server data), will sync after store hydrates...');
+          // Wait longer to ensure store is hydrated before syncing
           setTimeout(() => {
             try {
-              DeviceEventEmitter.emit('ambition-sync-trigger');
-              console.log('[UnifiedUser] ✅ Emitted sync event for premium user (Google)');
+              DeviceEventEmitter.emit('ambition-sync-trigger', { forceSync: true, isPremium: true });
+              console.log('[UnifiedUser] ✅ Emitted sync event for premium user with local data (Google)');
             } catch (e) {
               console.warn('[UnifiedUser] Could not emit sync event:', e);
             }
-          }, 1000);
+          }, 3000); // Increased delay to ensure store is hydrated
+        } else if (isPremium && serverHasData) {
+          console.log('[UnifiedUser] Premium user with server data restored - skipping immediate sync to prevent data loss');
+          // Don't sync immediately after restore - the data is already in the database
         }
       } else {
         // No dbUser - use guest data to create fallback user
@@ -1868,8 +1873,8 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
         // Don't clear - we want to keep the local roadmap/goal
       }
       
-      // 11. Trigger initial sync for premium users to ensure any local changes are synced to database
-      // This ensures data consistency after sign-in
+      // 11. Trigger initial sync for premium users ONLY if we have local data that might differ from server
+      // Don't sync immediately after restore - wait for store to hydrate and only sync if we have local changes
       const isLifetime = userData.subscriptionPlan === 'lifetime';
       const isMonthlyOrAnnual = userData.subscriptionPlan === 'monthly' || userData.subscriptionPlan === 'annual';
       const hasValidExpiration = !userData.subscriptionExpiresAt || userData.subscriptionExpiresAt > new Date();
@@ -1878,17 +1883,20 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
                        userData.subscriptionStatus === 'active' &&
                        (isLifetime || (isMonthlyOrAnnual && hasValidExpiration));
       
-      if (isPremium) {
-        console.log('[UnifiedUser] Premium user detected, triggering initial data sync...');
-        // Wait a bit for ambition store to reload, then trigger sync
+      if (isPremium && hasLocalData && !serverHasData) {
+        console.log('[UnifiedUser] Premium user with local data (no server data), will sync after store hydrates...');
+        // Wait longer to ensure store is hydrated before syncing
         setTimeout(() => {
           try {
-            DeviceEventEmitter.emit('ambition-sync-trigger');
-            console.log('[UnifiedUser] ✅ Emitted sync event for premium user');
+            DeviceEventEmitter.emit('ambition-sync-trigger', { forceSync: true, isPremium: true });
+            console.log('[UnifiedUser] ✅ Emitted sync event for premium user with local data');
           } catch (e) {
             console.warn('[UnifiedUser] Could not emit sync event:', e);
           }
-        }, 1000);
+        }, 3000); // Increased delay to ensure store is hydrated
+      } else if (isPremium && serverHasData) {
+        console.log('[UnifiedUser] Premium user with server data restored - skipping immediate sync to prevent data loss');
+        // Don't sync immediately after restore - the data is already in the database
       }
       
       console.log('[UnifiedUser] ✅ Sign in complete');
