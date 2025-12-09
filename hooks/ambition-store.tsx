@@ -1,6 +1,7 @@
 import createContextHook from '@nkzw/create-context-hook';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
 import { httpRequest } from '@/lib/http';
 import { useUi } from '@/providers/UiProvider';
 import { AppError } from '@/lib/errors';
@@ -76,6 +77,10 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
   const notificationSentRef = useRef<Set<string>>(new Set());
   const isGeneratingRoadmapRef = useRef(false);
   const syncInProgressRef = useRef(false);
+  const lastSyncTimeRef = useRef<number>(0);
+  const syncDebounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const periodicSyncIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   
   // tRPC mutation for syncing data (must be at hook level)
   const updateUserMutation = trpc.user.update.useMutation();
@@ -136,6 +141,12 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     // Prevent concurrent syncs (unless forced and retrying)
     if (syncInProgressRef.current && !(forceSync && retryCount > 0)) {
       console.log('[Ambition] Sync already in progress, skipping');
+      return;
+    }
+    
+    // Don't sync if app is in background (unless forced)
+    if (!forceSync && appStateRef.current !== 'active') {
+      console.log('[Ambition] App not active, skipping sync');
       return;
     }
     
@@ -324,11 +335,14 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
       // Use mutateAsync for proper async handling
       const result = await updateUserMutation.mutateAsync(syncPayload);
       
+      lastSyncTimeRef.current = Date.now();
+      
       console.log('[Ambition] ✅ Data synced to database successfully:', {
         success: result.success,
         userId: result.user?.id,
         email: result.user?.email,
         updatedAt: result.user?.updatedAt,
+        lastSyncAt: result.user?.lastSyncAt,
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -338,11 +352,20 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         message: errorMessage,
         stack: errorStack,
         error: error,
+        retryCount,
       });
       
       // Log more details about the error
       if (errorMessage.includes('Network') || errorMessage.includes('fetch') || errorMessage.includes('Failed to fetch')) {
         console.error('[Ambition] Network error - backend may be unreachable');
+        // Retry network errors after a delay (up to 3 retries)
+        if (retryCount < 3 && forceSync) {
+          console.log('[Ambition] Retrying sync after network error in 5 seconds...');
+          setTimeout(() => {
+            syncAmbitionDataToDatabase(forceSync, isPremiumFromEvent, retryCount + 1);
+          }, 5000);
+          return; // Don't clear syncInProgress yet
+        }
       } else if (errorMessage.includes('JSON') || errorMessage.includes('parse')) {
         console.error('[Ambition] JSON parsing error - backend may have returned invalid response');
       } else if (errorMessage.includes('User not found') || errorMessage.includes('not found')) {
@@ -356,6 +379,19 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
       syncInProgressRef.current = false;
     }
   }, [goal, timeline, timeCommitment, answers, roadmap, completedTasks, streakData, taskTimers, updateUserMutation, isHydrated]);
+  
+  // Debounced sync function - waits 2 seconds after last change before syncing
+  const debouncedSync = useCallback((forceSync: boolean = false) => {
+    // Clear existing debounce timer
+    if (syncDebounceTimerRef.current) {
+      clearTimeout(syncDebounceTimerRef.current);
+    }
+    
+    // Set new debounce timer
+    syncDebounceTimerRef.current = setTimeout(() => {
+      syncAmbitionDataToDatabase(forceSync);
+    }, 2000); // Wait 2 seconds after last change
+  }, [syncAmbitionDataToDatabase]);
 
   // Load data from storage - extracted to reusable function
   const loadDataFromStorage = useCallback(async () => {
@@ -506,6 +542,70 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     };
   }, [isHydrated, loadDataFromStorage]);
 
+  // Monitor AppState and sync when app comes to foreground
+  useEffect(() => {
+    const handleAppStateChange = (nextAppState: AppStateStatus) => {
+      const previousAppState = appStateRef.current;
+      appStateRef.current = nextAppState;
+      
+      console.log('[Ambition] AppState changed:', { from: previousAppState, to: nextAppState });
+      
+      // When app comes to foreground, sync data if it's been more than 30 seconds since last sync
+      if (nextAppState === 'active' && previousAppState !== 'active') {
+        const timeSinceLastSync = Date.now() - lastSyncTimeRef.current;
+        const thirtySeconds = 30 * 1000;
+        
+        if (timeSinceLastSync > thirtySeconds) {
+          console.log('[Ambition] App came to foreground, syncing data...');
+          // Wait 2 seconds after app becomes active to ensure everything is ready
+          setTimeout(() => {
+            syncAmbitionDataToDatabase(true);
+          }, 2000);
+        } else {
+          console.log('[Ambition] App came to foreground, but last sync was recent (', Math.round(timeSinceLastSync / 1000), 'seconds ago)');
+        }
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    
+    return () => {
+      subscription.remove();
+    };
+  }, [syncAmbitionDataToDatabase]);
+  
+  // Periodic sync every 2 minutes when app is active
+  useEffect(() => {
+    if (!isHydrated) return;
+    
+    // Clear any existing interval
+    if (periodicSyncIntervalRef.current) {
+      clearInterval(periodicSyncIntervalRef.current);
+    }
+    
+    // Set up periodic sync (every 2 minutes)
+    periodicSyncIntervalRef.current = setInterval(() => {
+      if (appStateRef.current === 'active' && isHydrated) {
+        const timeSinceLastSync = Date.now() - lastSyncTimeRef.current;
+        const twoMinutes = 2 * 60 * 1000;
+        
+        // Only sync if it's been more than 2 minutes since last sync
+        if (timeSinceLastSync > twoMinutes) {
+          console.log('[Ambition] Periodic sync triggered (2 minutes elapsed)');
+          syncAmbitionDataToDatabase(false);
+        } else {
+          console.log('[Ambition] Periodic sync skipped (last sync was', Math.round(timeSinceLastSync / 1000), 'seconds ago)');
+        }
+      }
+    }, 2 * 60 * 1000); // Check every 2 minutes
+    
+    return () => {
+      if (periodicSyncIntervalRef.current) {
+        clearInterval(periodicSyncIntervalRef.current);
+      }
+    };
+  }, [isHydrated, syncAmbitionDataToDatabase]);
+
   // Listen for storage reload events (triggered after sign-in)
   useEffect(() => {
     const handleStorageReload = () => {
@@ -516,6 +616,16 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     // Listen for clear all event (triggered on sign-out)
     const handleClearAll = async () => {
       console.log('[Ambition] Clear all event received, clearing in-memory state...');
+      
+      // Clear sync timers
+      if (syncDebounceTimerRef.current) {
+        clearTimeout(syncDebounceTimerRef.current);
+        syncDebounceTimerRef.current = null;
+      }
+      if (periodicSyncIntervalRef.current) {
+        clearInterval(periodicSyncIntervalRef.current);
+        periodicSyncIntervalRef.current = null;
+      }
       
       // Cancel all notifications when clearing data on sign-out
       try {
@@ -535,6 +645,7 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
       setCompletedTasksState([]);
       setStreakDataState({ lastCompletionDate: '', streak: 0 });
       setTaskTimersState([]);
+      lastSyncTimeRef.current = 0;
       console.log('[Ambition] ✅ In-memory state cleared');
     };
 
@@ -551,10 +662,170 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     };
     const syncSubscription = DeviceEventEmitter.addListener('ambition-sync-trigger', syncTriggerHandler);
     
+    // Listen for realtime database updates
+    const databaseUpdateHandler = async (updateData: {
+      goal?: string | null;
+      roadmap?: string | null;
+      timeline?: string | null;
+      timeCommitment?: string | null;
+      answers?: string | null;
+      completedTasks?: string | null;
+      streakData?: string | null;
+      taskTimers?: string | null;
+    }) => {
+      console.log('[Ambition] 🔔 Received database update from realtime sync:', {
+        hasGoal: updateData.goal !== undefined,
+        hasRoadmap: updateData.roadmap !== undefined,
+        hasTimeline: updateData.timeline !== undefined,
+        hasTimeCommitment: updateData.timeCommitment !== undefined,
+        hasAnswers: updateData.answers !== undefined,
+        hasCompletedTasks: updateData.completedTasks !== undefined,
+        hasStreakData: updateData.streakData !== undefined,
+        hasTaskTimers: updateData.taskTimers !== undefined,
+      });
+
+      try {
+        // Update goal if provided
+        if (updateData.goal !== undefined) {
+          if (updateData.goal !== null && updateData.goal !== '') {
+            setGoalState(updateData.goal);
+            await AsyncStorage.setItem(STORAGE_KEYS.GOAL, updateData.goal);
+            console.log('[Ambition] ✅ Goal updated from database:', updateData.goal.substring(0, 50) + '...');
+          } else {
+            // Clear goal if null or empty
+            setGoalState('');
+            await AsyncStorage.removeItem(STORAGE_KEYS.GOAL);
+            console.log('[Ambition] ✅ Goal cleared from database');
+          }
+        }
+
+        // Update timeline if provided
+        if (updateData.timeline !== undefined) {
+          if (updateData.timeline !== null && updateData.timeline !== '') {
+            setTimelineState(updateData.timeline);
+            await AsyncStorage.setItem(STORAGE_KEYS.TIMELINE, updateData.timeline);
+            console.log('[Ambition] ✅ Timeline updated from database');
+          } else {
+            setTimelineState('');
+            await AsyncStorage.removeItem(STORAGE_KEYS.TIMELINE);
+          }
+        }
+
+        // Update time commitment if provided
+        if (updateData.timeCommitment !== undefined) {
+          if (updateData.timeCommitment !== null && updateData.timeCommitment !== '') {
+            setTimeCommitmentState(updateData.timeCommitment);
+            await AsyncStorage.setItem(STORAGE_KEYS.TIME_COMMITMENT, updateData.timeCommitment);
+            console.log('[Ambition] ✅ Time commitment updated from database');
+          } else {
+            setTimeCommitmentState('');
+            await AsyncStorage.removeItem(STORAGE_KEYS.TIME_COMMITMENT);
+          }
+        }
+
+        // Update answers if provided
+        if (updateData.answers !== undefined) {
+          if (updateData.answers !== null && updateData.answers !== '') {
+            try {
+              const parsedAnswers = JSON.parse(updateData.answers);
+              if (Array.isArray(parsedAnswers)) {
+                setAnswersState(parsedAnswers);
+                await AsyncStorage.setItem(STORAGE_KEYS.ANSWERS, updateData.answers);
+                console.log('[Ambition] ✅ Answers updated from database');
+              }
+            } catch (e) {
+              console.error('[Ambition] Failed to parse answers from database:', e);
+            }
+          } else {
+            setAnswersState([]);
+            await AsyncStorage.removeItem(STORAGE_KEYS.ANSWERS);
+          }
+        }
+
+        // Update roadmap if provided
+        if (updateData.roadmap !== undefined) {
+          if (updateData.roadmap !== null && updateData.roadmap !== '') {
+            try {
+              const parsedRoadmap = JSON.parse(updateData.roadmap);
+              setRoadmapState(parsedRoadmap);
+              await AsyncStorage.setItem(STORAGE_KEYS.ROADMAP, updateData.roadmap);
+              console.log('[Ambition] ✅ Roadmap updated from database');
+            } catch (e) {
+              console.error('[Ambition] Failed to parse roadmap from database:', e);
+            }
+          } else {
+            setRoadmapState(null);
+            await AsyncStorage.removeItem(STORAGE_KEYS.ROADMAP);
+          }
+        }
+
+        // Update completed tasks if provided
+        if (updateData.completedTasks !== undefined) {
+          if (updateData.completedTasks !== null && updateData.completedTasks !== '') {
+            try {
+              const parsedCompletedTasks = JSON.parse(updateData.completedTasks);
+              if (Array.isArray(parsedCompletedTasks)) {
+                setCompletedTasksState(parsedCompletedTasks);
+                await AsyncStorage.setItem(STORAGE_KEYS.COMPLETED_TASKS, updateData.completedTasks);
+                console.log('[Ambition] ✅ Completed tasks updated from database');
+              }
+            } catch (e) {
+              console.error('[Ambition] Failed to parse completed tasks from database:', e);
+            }
+          } else {
+            setCompletedTasksState([]);
+            await AsyncStorage.removeItem(STORAGE_KEYS.COMPLETED_TASKS);
+          }
+        }
+
+        // Update streak data if provided
+        if (updateData.streakData !== undefined) {
+          if (updateData.streakData !== null && updateData.streakData !== '') {
+            try {
+              const parsedStreakData = JSON.parse(updateData.streakData);
+              setStreakDataState(parsedStreakData);
+              await AsyncStorage.setItem(STORAGE_KEYS.STREAK_DATA, updateData.streakData);
+              console.log('[Ambition] ✅ Streak data updated from database');
+            } catch (e) {
+              console.error('[Ambition] Failed to parse streak data from database:', e);
+            }
+          } else {
+            setStreakDataState({ lastCompletionDate: '', streak: 0 });
+            await AsyncStorage.removeItem(STORAGE_KEYS.STREAK_DATA);
+          }
+        }
+
+        // Update task timers if provided
+        if (updateData.taskTimers !== undefined) {
+          if (updateData.taskTimers !== null && updateData.taskTimers !== '') {
+            try {
+              const parsedTaskTimers = JSON.parse(updateData.taskTimers);
+              if (Array.isArray(parsedTaskTimers)) {
+                setTaskTimersState(parsedTaskTimers);
+                await AsyncStorage.setItem(STORAGE_KEYS.TASK_TIMERS, updateData.taskTimers);
+                console.log('[Ambition] ✅ Task timers updated from database');
+              }
+            } catch (e) {
+              console.error('[Ambition] Failed to parse task timers from database:', e);
+            }
+          } else {
+            setTaskTimersState([]);
+            await AsyncStorage.removeItem(STORAGE_KEYS.TASK_TIMERS);
+          }
+        }
+
+        console.log('[Ambition] ✅ All database updates applied successfully');
+      } catch (error) {
+        console.error('[Ambition] ❌ Error applying database updates:', error);
+      }
+    };
+    const databaseUpdateSubscription = DeviceEventEmitter.addListener('ambition-database-update', databaseUpdateHandler);
+    
     return () => {
       reloadSubscription.remove();
       clearSubscription.remove();
       syncSubscription.remove();
+      databaseUpdateSubscription.remove();
     };
   }, [loadDataFromStorage, syncAmbitionDataToDatabase]);
 
@@ -661,8 +932,8 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     setGoalState(sanitized);
     await AsyncStorage.setItem(STORAGE_KEYS.GOAL, sanitized);
     console.log('[Ambition] ✅ Goal saved to storage:', sanitized.substring(0, 50) + '...');
-    // Sync to database
-    await syncAmbitionDataToDatabase();
+    // Sync to database (debounced)
+    debouncedSync();
   };
 
   const setTimeline = async (newTimeline: string) => {
@@ -678,8 +949,8 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     }
     setTimelineState(sanitized);
     await AsyncStorage.setItem(STORAGE_KEYS.TIMELINE, sanitized);
-    // Sync to database
-    await syncAmbitionDataToDatabase();
+    // Sync to database (debounced)
+    debouncedSync();
   };
 
   const setTimeCommitment = async (newTimeCommitment: string) => {
@@ -695,8 +966,8 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     }
     setTimeCommitmentState(sanitized);
     await AsyncStorage.setItem(STORAGE_KEYS.TIME_COMMITMENT, sanitized);
-    // Sync to database
-    await syncAmbitionDataToDatabase();
+    // Sync to database (debounced)
+    debouncedSync();
   };
 
   const addAnswer = async (answer: string) => {
@@ -713,8 +984,8 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     const newAnswers = [...answers, sanitized];
     setAnswersState(newAnswers);
     await AsyncStorage.setItem(STORAGE_KEYS.ANSWERS, JSON.stringify(newAnswers));
-    // Sync to database
-    await syncAmbitionDataToDatabase();
+    // Sync to database (debounced)
+    debouncedSync();
   };
 
   const inferIndustry = (g: string, contextAnswers: string[]): string => {
@@ -946,8 +1217,8 @@ Output ONLY valid JSON in this exact format:
       console.log('Roadmap generated successfully');
       analytics.trackRoadmapGenerated(sanitizedGoal, sanitizedTimeline, sanitizedTimeCommitment);
       
-      // Sync to database
-      await syncAmbitionDataToDatabase();
+      // Sync to database immediately (roadmap generation is important)
+      await syncAmbitionDataToDatabase(true);
     } catch (error) {
       console.error('Error generating roadmap:', error);
       const msg = error instanceof AppError ? error.message : (error as Error)?.message ?? 'Unexpected error';
@@ -986,8 +1257,8 @@ Output ONLY valid JSON in this exact format:
       setTaskTimersState([]);
       await AsyncStorage.removeItem(STORAGE_KEYS.TASK_TIMERS);
       
-      // Sync to database
-      await syncAmbitionDataToDatabase();
+      // Sync to database immediately (roadmap generation is important)
+      await syncAmbitionDataToDatabase(true);
     } finally {
       isGeneratingRoadmapRef.current = false;
     }
@@ -1283,12 +1554,12 @@ Output ONLY valid JSON in this exact format:
     console.log(`[Timer] All timers after start:`, updatedTimers.filter(t => t.isActive).map(t => t.taskId));
     analytics.track('task_started', { task_id: taskId, duration_minutes: duration });
     
-    // Sync to database (don't fail timer start if sync fails)
+    // Sync to database (debounced, don't fail timer start if sync fails)
     try {
-    await syncAmbitionDataToDatabase();
+      debouncedSync();
     } catch (syncError) {
-      console.error(`[Timer] Error syncing timer to database:`, syncError);
-      console.warn(`[Timer] ⚠️ Timer started successfully but database sync failed - timer will continue to work locally`);
+      console.error(`[Timer] Error scheduling sync:`, syncError);
+      console.warn(`[Timer] ⚠️ Timer started successfully but sync scheduling failed - timer will continue to work locally`);
       // Don't throw - timer is already saved locally and working
     }
   };
@@ -1316,8 +1587,8 @@ Output ONLY valid JSON in this exact format:
     
     console.log(`[Timer] Timer stopped successfully for task ${taskId}`);
     
-    // Sync to database
-    await syncAmbitionDataToDatabase();
+    // Sync to database (debounced)
+    debouncedSync();
   };
 
   const getTaskTimer = (taskId: string): TaskTimer | null => {
@@ -1411,8 +1682,8 @@ Output ONLY valid JSON in this exact format:
       analytics.trackTaskCompleted(taskId, timer ? Date.now() - timer.startTime : 0);
     }
     
-    // Sync to database
-    await syncAmbitionDataToDatabase();
+    // Sync to database immediately (task completion is important)
+    await syncAmbitionDataToDatabase(true);
     
     return true; // Return true to indicate toggle was successful
   };
@@ -1445,8 +1716,8 @@ Output ONLY valid JSON in this exact format:
       analytics.trackStreakAchieved(newStreak);
     }
     
-    // Sync to database
-    await syncAmbitionDataToDatabase();
+    // Sync to database (debounced)
+    debouncedSync();
   };
 
   const getProgress = () => {
@@ -1610,8 +1881,8 @@ Output ONLY valid JSON in this exact format:
       setStreakDataState({ lastCompletionDate: '', streak: 0 });
       setTaskTimersState([]);
       
-      // Sync to database after reset
-      await syncAmbitionDataToDatabase();
+      // Sync to database immediately after reset
+      await syncAmbitionDataToDatabase(true);
     } catch (error) {
       console.error('Error resetting progress:', error);
     }
@@ -1659,8 +1930,8 @@ Output ONLY valid JSON in this exact format:
       setStreakDataState({ lastCompletionDate: '', streak: 0 });
       setTaskTimersState([]);
       
-      // Sync to database after clearing (will sync empty/null values)
-      await syncAmbitionDataToDatabase();
+      // Sync to database immediately after clearing (will sync empty/null values)
+      await syncAmbitionDataToDatabase(true);
     } catch (error) {
       console.error('Error clearing data:', error);
     }
@@ -1697,6 +1968,7 @@ Output ONLY valid JSON in this exact format:
     isMilestoneUnlocked,
     isPhaseUnlocked,
     reloadFromStorage: loadDataFromStorage,
+    syncToDatabase: () => syncAmbitionDataToDatabase(true),
   };
 });
 

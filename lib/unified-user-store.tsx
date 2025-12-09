@@ -383,9 +383,172 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       }
     });
 
+    // Set up Supabase realtime subscription to listen for database changes
+    let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
+
+    const setupRealtimeSync = async () => {
+      try {
+        const currentUser = userRef.current;
+        if (!currentUser || currentUser.isGuest || !currentUser.email) {
+          console.log('[UnifiedUser] Skipping realtime setup - user is guest or no email');
+          // Clean up existing subscription if user is no longer valid
+          if (realtimeChannel) {
+            await supabase.removeChannel(realtimeChannel);
+            realtimeChannel = null;
+          }
+          return;
+        }
+
+        // Clean up existing subscription if any
+        if (realtimeChannel) {
+          console.log('[UnifiedUser] Cleaning up existing realtime channel');
+          await supabase.removeChannel(realtimeChannel);
+          realtimeChannel = null;
+        }
+
+        console.log('[UnifiedUser] 🔄 Setting up realtime sync for user:', currentUser.email);
+
+        // Create a channel for this user (sanitize email for channel name)
+        const channelName = `user-changes-${currentUser.email.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        
+        // Create a channel for this user
+        realtimeChannel = supabase
+          .channel(channelName)
+          .on(
+            'postgres_changes',
+            {
+              event: 'UPDATE',
+              schema: 'public',
+              table: 'users',
+              filter: `email=eq.${currentUser.email}`,
+            },
+            async (payload) => {
+              console.log('[UnifiedUser] 🔔 Realtime update received:', {
+                event: payload.eventType,
+                table: payload.table,
+                new: payload.new,
+                old: payload.old,
+              });
+
+              // Only process if app is active
+              if (appStateRef.current !== 'active') {
+                console.log('[UnifiedUser] App not active, deferring realtime update');
+                return;
+              }
+
+              try {
+                const updatedData = payload.new as any;
+                const currentUserData = userRef.current;
+
+                if (!currentUserData || currentUserData.email !== updatedData.email) {
+                  console.log('[UnifiedUser] Realtime update for different user, ignoring');
+                  return;
+                }
+
+                // Update unified user store with new data
+                const updatedUser: UnifiedUser = {
+                  ...currentUserData,
+                  name: updatedData.name || currentUserData.name,
+                  username: updatedData.username || currentUserData.username,
+                  profilePicture: updatedData.profilePicture || currentUserData.profilePicture,
+                  subscriptionPlan: (updatedData.subscriptionPlan || currentUserData.subscriptionPlan) as any,
+                  subscriptionStatus: (updatedData.subscriptionStatus || currentUserData.subscriptionStatus) as any,
+                  subscriptionExpiresAt: updatedData.subscriptionExpiresAt
+                    ? new Date(updatedData.subscriptionExpiresAt)
+                    : currentUserData.subscriptionExpiresAt,
+                  subscriptionPurchasedAt: updatedData.subscriptionPurchasedAt
+                    ? new Date(updatedData.subscriptionPurchasedAt)
+                    : currentUserData.subscriptionPurchasedAt,
+                };
+
+                // Save updated user to AsyncStorage
+                await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(updatedUser));
+                userRef.current = updatedUser;
+                setUserInternal(updatedUser);
+
+                console.log('[UnifiedUser] ✅ Realtime update applied to unified user store');
+
+                // If goal/roadmap data changed, update ambition store
+                const goalChanged = updatedData.goal !== undefined && updatedData.goal !== null;
+                const roadmapChanged = updatedData.roadmap !== undefined && updatedData.roadmap !== null;
+                const timelineChanged = updatedData.timeline !== undefined && updatedData.timeline !== null;
+                const timeCommitmentChanged = updatedData.timeCommitment !== undefined && updatedData.timeCommitment !== null;
+                const answersChanged = updatedData.answers !== undefined && updatedData.answers !== null;
+                const completedTasksChanged = updatedData.completedTasks !== undefined && updatedData.completedTasks !== null;
+                const streakDataChanged = updatedData.streakData !== undefined && updatedData.streakData !== null;
+                const taskTimersChanged = updatedData.taskTimers !== undefined && updatedData.taskTimers !== null;
+
+                if (
+                  goalChanged ||
+                  roadmapChanged ||
+                  timelineChanged ||
+                  timeCommitmentChanged ||
+                  answersChanged ||
+                  completedTasksChanged ||
+                  streakDataChanged ||
+                  taskTimersChanged
+                ) {
+                  console.log('[UnifiedUser] 🔔 Goal/roadmap data changed, triggering ambition store update');
+                  
+                  // Emit event to update ambition store
+                  DeviceEventEmitter.emit('ambition-database-update', {
+                    goal: updatedData.goal,
+                    roadmap: updatedData.roadmap,
+                    timeline: updatedData.timeline,
+                    timeCommitment: updatedData.timeCommitment,
+                    answers: updatedData.answers,
+                    completedTasks: updatedData.completedTasks,
+                    streakData: updatedData.streakData,
+                    taskTimers: updatedData.taskTimers,
+                  });
+                }
+              } catch (error) {
+                console.error('[UnifiedUser] ❌ Error processing realtime update:', error);
+              }
+            }
+          )
+          .subscribe((status) => {
+            console.log('[UnifiedUser] Realtime subscription status:', status);
+            if (status === 'SUBSCRIBED') {
+              console.log('[UnifiedUser] ✅ Realtime sync subscribed successfully');
+            } else if (status === 'CHANNEL_ERROR') {
+              console.error('[UnifiedUser] ❌ Realtime subscription error');
+            }
+          });
+
+        console.log('[UnifiedUser] ✅ Realtime sync setup complete');
+      } catch (error) {
+        console.error('[UnifiedUser] ❌ Error setting up realtime sync:', error);
+      }
+    };
+
+    // Set up realtime sync when user is loaded
+    const setupRealtimeAfterLoad = async () => {
+      // Wait a bit for user to be loaded
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      await setupRealtimeSync();
+    };
+
+    setupRealtimeAfterLoad();
+
+    // Also set up realtime sync when user changes (e.g., after sign-in)
+    const userChangeListener = DeviceEventEmitter.addListener('user-state-changed', async () => {
+      console.log('[UnifiedUser] User state changed, re-setting up realtime sync');
+      await setupRealtimeSync();
+    });
+
     return () => {
       subscription.unsubscribe();
       subscriptionUpdateListener.remove();
+      userChangeListener.remove();
+      
+      // Clean up realtime subscription
+      if (realtimeChannel) {
+        supabase.removeChannel(realtimeChannel).catch((error) => {
+          console.error('[UnifiedUser] Error removing realtime channel:', error);
+        });
+        realtimeChannel = null;
+      }
     };
   }, []); // Empty deps - we use userRef.current inside the listener
 
@@ -1003,8 +1166,16 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
   };
 
   const saveUser = async (updatedUser: UnifiedUser) => {
+    const previousUser = userRef.current;
     setUserInternal(updatedUser);
+    userRef.current = updatedUser;
     await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(updatedUser));
+    
+    // Emit event to re-establish realtime sync if user changed (e.g., signed in)
+    if (!previousUser || previousUser.email !== updatedUser.email || previousUser.isGuest !== updatedUser.isGuest) {
+      console.log('[UnifiedUser] User state changed, emitting event to re-establish realtime sync');
+      DeviceEventEmitter.emit('user-state-changed');
+    }
   };
 
   // Helper function to trigger ambition store reload
