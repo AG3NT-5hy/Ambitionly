@@ -168,7 +168,10 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
       // CRITICAL: Only sync roadmap/goal data if user has premium subscription
       // This ensures free users' data stays local only
       // If forceSync is true and we have premium status from event, use that instead of checking
-      const hasPremium = isPremiumFromEvent !== undefined ? isPremiumFromEvent : userSession.hasPremium;
+      const hasPremium =
+        isPremiumFromEvent === true
+          ? true
+          : userSession.hasPremium;
       
       if (!hasPremium) {
         // If forceSync is true, retry after a delay (AsyncStorage might not be updated yet)
@@ -270,7 +273,7 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
       // 2. We're explicitly updating subscription data (which is handled separately)
       const hasLocalData = !!(syncGoal || syncRoadmap);
       
-      if (!hasLocalData) {
+      if (!hasLocalData && !forceSync) {
         console.log('[Ambition] ⚠️ No local roadmap/goal data to sync, skipping data sync (subscription will still sync separately)');
         console.log('[Ambition] This prevents clearing existing database data when store is not hydrated');
         // Don't sync empty values - just return
