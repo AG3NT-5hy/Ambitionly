@@ -11,16 +11,18 @@ import {
   Platform,
   TextInput,
   KeyboardAvoidingView,
+  DeviceEventEmitter,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Stack, router } from 'expo-router';
-import { ChevronLeft, Download, Trash2, Bug, Settings, Lock, Eye, EyeOff, Mail, RefreshCw, Filter, Crown } from 'lucide-react-native';
+import { ChevronLeft, Download, Trash2, Bug, Settings, Lock, Eye, EyeOff, Mail, RefreshCw, Filter, Crown, Upload } from 'lucide-react-native';
 import { COLORS } from '../constants'
 import { debugService, log, type DebugInfo } from '../lib/debug'
 import { analytics } from '../lib/analytics'
 import { useAmbition } from '../hooks/ambition-store'
 import EmailViewerFallback from '@/components/EmailViewerFallback'
 import { trpc } from '../lib/trpc'
+import { useUnifiedUser } from '../lib/unified-user-store'
 
 // Developer credentials - in production, these should be stored securely
 const DEV_USERNAME = 'ag3nt';
@@ -41,6 +43,8 @@ const DevSettingsScreen: React.FC = () => {
   const [logs, setLogs] = useState(debugService.getLogs(undefined, undefined, 200));
   const [logLevelFilter, setLogLevelFilter] = useState<'debug' | 'info' | 'warn' | 'error' | undefined>(undefined);
   const { clearAllData, resetProgress } = useAmbition();
+  const { user } = useUnifiedUser();
+  const [isSyncing, setIsSyncing] = useState(false);
   
   // Premium access grant state
   const [grantEmail, setGrantEmail] = useState('');
@@ -274,6 +278,40 @@ const DevSettingsScreen: React.FC = () => {
     }
   };
 
+  const handleForceSync = async () => {
+    if (!user || user.isGuest) {
+      Alert.alert('Error', 'You must be signed in to sync data');
+      return;
+    }
+
+    setIsSyncing(true);
+    try {
+      // Emit force sync event - forceSync: true will bypass premium check
+      DeviceEventEmitter.emit('ambition-sync-trigger', { forceSync: true });
+      
+      log.info('DevSettings', 'Force sync triggered (bypassing premium check)', { 
+        email: user.email,
+        plan: user.subscriptionPlan 
+      });
+      analytics.track('dev_force_sync', { bypassPremium: true });
+
+      // Show success message after a short delay
+      setTimeout(() => {
+        setIsSyncing(false);
+        Alert.alert(
+          'Sync Triggered',
+          'Force sync has been triggered. Your local data will be pushed to the database regardless of premium status.',
+          [{ text: 'OK' }]
+        );
+      }, 500);
+    } catch (error) {
+      setIsSyncing(false);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to trigger sync';
+      Alert.alert('Error', errorMessage);
+      log.error('DevSettings', 'Failed to trigger force sync', error);
+    }
+  };
+
   const renderInfoSection = (title: string, data: any) => {
     if (!data || typeof data !== 'object') return null;
     
@@ -313,16 +351,25 @@ const DevSettingsScreen: React.FC = () => {
     );
   };
 
-  const renderActionButton = (title: string, onPress: () => void, icon: React.ReactNode, destructive = false) => {
+  const renderActionButton = (title: string, onPress: () => void, icon: React.ReactNode, destructive = false, disabled = false) => {
     return (
       <TouchableOpacity
-        style={[styles.actionButton, destructive && styles.destructiveButton]}
+        style={[
+          styles.actionButton, 
+          destructive && styles.destructiveButton,
+          disabled && styles.actionButtonDisabled
+        ]}
         onPress={onPress}
+        disabled={disabled}
       >
         <View style={styles.iconContainer}>
           {icon}
         </View>
-        <Text style={[styles.actionButtonText, destructive && styles.destructiveText]}>
+        <Text style={[
+          styles.actionButtonText, 
+          destructive && styles.destructiveText,
+          disabled && styles.actionButtonTextDisabled
+        ]}>
           {title}
         </Text>
       </TouchableOpacity>
@@ -551,6 +598,18 @@ const DevSettingsScreen: React.FC = () => {
             'Grant Premium Access',
             () => setShowGrantPremium(true),
             <Crown size={20} color={COLORS.PRIMARY} />
+          )}
+          
+          {renderActionButton(
+            isSyncing ? 'Syncing...' : 'Force Sync Data',
+            handleForceSync,
+            isSyncing ? (
+              <RefreshCw size={20} color={COLORS.TEXT_MUTED} />
+            ) : (
+              <Upload size={20} color={COLORS.PRIMARY} />
+            ),
+            false,
+            isSyncing
           )}
           
           {renderActionButton(

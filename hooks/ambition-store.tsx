@@ -167,26 +167,24 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
       
       // CRITICAL: Only sync roadmap/goal data if user has premium subscription
       // This ensures free users' data stays local only
+      // EXCEPTION: If forceSync is true, bypass premium check and sync anyway (for dev/admin purposes)
       // If forceSync is true and we have premium status from event, use that instead of checking
       const hasPremium =
         isPremiumFromEvent === true
           ? true
           : userSession.hasPremium;
       
-      if (!hasPremium) {
-        // If forceSync is true, retry after a delay (AsyncStorage might not be updated yet)
-        if (forceSync && retryCount < 3) {
-          console.log('[Ambition] ⚠️ Premium check failed but forceSync=true, retrying after delay (attempt', retryCount + 1, ')...');
-          setTimeout(() => {
-            syncAmbitionDataToDatabase(forceSync, isPremiumFromEvent, retryCount + 1);
-          }, 1500); // Wait 1.5 seconds before retry
-          return;
-        }
-        
+      // If forceSync is true, allow syncing even without premium (for dev/admin purposes)
+      if (!hasPremium && !forceSync) {
         console.log('[Ambition] ⚠️ User does not have premium subscription, skipping cloud sync');
         console.log('[Ambition] Note: Roadmap/goal data is NOT saved to database for free users');
         console.log('[Ambition] Note: Subscription data is synced separately via unified-user-store');
+        console.log('[Ambition] Note: Use force sync in dev settings to bypass this check');
         return;
+      }
+      
+      if (!hasPremium && forceSync) {
+        console.log('[Ambition] ⚠️ Force sync enabled - syncing data despite non-premium status (dev/admin mode)');
       }
       
       syncInProgressRef.current = true;
