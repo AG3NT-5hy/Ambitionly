@@ -352,13 +352,8 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
                 
                 if (hasPremium || attempt >= 3) {
                   // User is premium or we've tried 3 times, trigger sync
-                  // Use isPremium: true when hasPremium is true to ensure sync works
                   DeviceEventEmitter.emit('ambition-sync-trigger', { forceSync: true, isPremium: hasPremium });
-                  console.log('[UnifiedUser] ✅ Emitted ambition-sync-trigger event (attempt', attempt, ') to sync existing local roadmap data', {
-                    hasPremium,
-                    forceSync: true,
-                    isPremium: hasPremium,
-                  });
+                  console.log('[UnifiedUser] ✅ Emitted ambition-sync-trigger event (attempt', attempt, ') to sync existing local roadmap data');
                 } else {
                   // Premium status not yet saved, retry
                   console.log('[UnifiedUser] Premium status not yet saved, retrying sync trigger (attempt', attempt, ')...');
@@ -1613,53 +1608,29 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       
       // 5. Create user in database with guest data (only if backend is available)
       // If backend was unavailable, we'll skip this and sync later
-      // CRITICAL: Only sync goal/roadmap data if user has premium subscription
-      // Free users' data stays local only
       if (backendSignupSucceeded) {
         const directClient = createBackendClient();
-        
-        // Check if user has premium subscription
-        const subscriptionPlan = guestData.subscriptionPlan || 'free';
-        const subscriptionStatus = guestData.subscriptionStatus || 'inactive';
-        const subscriptionExpiresAt = guestData.subscriptionExpiresAt;
-        const isLifetime = subscriptionPlan === 'lifetime';
-        const isMonthlyOrAnnual = subscriptionPlan === 'monthly' || subscriptionPlan === 'annual';
-        const hasValidExpiration = !subscriptionExpiresAt || subscriptionExpiresAt > new Date();
-        const isPremium = subscriptionPlan !== 'free' && 
-                         subscriptionStatus === 'active' &&
-                         (isLifetime || (isMonthlyOrAnnual && hasValidExpiration));
-        
-        const createPayload: any = {
+        const createPayload = {
             email,
             name,
             supabaseId: supabaseUserId,
             revenueCatUserId: email,
             isGuest: false,
             guestData: {
-              // Only include goal/roadmap data if user is premium
-              ...(isPremium ? {
-                goal: guestData.goal,
-                timeline: guestData.timeline,
-                timeCommitment: guestData.timeCommitment,
-                answers: guestData.answers ? JSON.stringify(guestData.answers) : null,
-                roadmap: guestData.roadmap ? JSON.stringify(guestData.roadmap) : null,
-                completedTasks: Array.isArray(guestData.completedTasks) ? JSON.stringify(guestData.completedTasks) : null,
-                streakData: guestData.streakData ? JSON.stringify(guestData.streakData) : null,
-                taskTimers: guestData.taskTimers ? JSON.stringify(guestData.taskTimers) : null,
-              } : {}),
-              // ALWAYS include subscription data (regardless of premium status)
+              goal: guestData.goal,
+              timeline: guestData.timeline,
+              timeCommitment: guestData.timeCommitment,
+              answers: guestData.answers ? JSON.stringify(guestData.answers) : null,
+              roadmap: guestData.roadmap ? JSON.stringify(guestData.roadmap) : null,
+              completedTasks: Array.isArray(guestData.completedTasks) ? JSON.stringify(guestData.completedTasks) : null,
+              streakData: guestData.streakData ? JSON.stringify(guestData.streakData) : null,
+              taskTimers: guestData.taskTimers ? JSON.stringify(guestData.taskTimers) : null,
               subscriptionPlan: guestData.subscriptionPlan,
               subscriptionStatus: guestData.subscriptionStatus,
               subscriptionExpiresAt: guestData.subscriptionExpiresAt?.toISOString(),
               subscriptionPurchasedAt: guestData.subscriptionPurchasedAt?.toISOString(),
             },
         };
-        
-        if (isPremium) {
-          console.log('[UnifiedUser] ✅ Premium user - will sync goal/roadmap data during signup');
-        } else {
-          console.log('[UnifiedUser] ⚠️ Free user - will NOT sync goal/roadmap data during signup (stays local only)');
-        }
 
         try {
           console.log('[UnifiedUser] Attempting to create user in database via mutation...');
@@ -2082,21 +2053,6 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
                        userData.subscriptionStatus === 'active' &&
                        (isLifetime || (isMonthlyOrAnnual && hasValidExpiration));
       
-      // CRITICAL: If premium user signs in but has no data in database, sync local data
-      // This handles the case where user becomes premium but hasn't synced yet
-      if (isPremium && !serverHasData && hasLocalData) {
-        console.log('[UnifiedUser] 🎯 Premium user with local data but no database data - will trigger sync after hydration');
-        // Trigger sync after a delay to allow store to hydrate
-        setTimeout(() => {
-          try {
-            DeviceEventEmitter.emit('ambition-sync-trigger', { forceSync: true, isPremium: true });
-            console.log('[UnifiedUser] ✅ Triggered sync for premium user with local data');
-          } catch (error) {
-            console.warn('[UnifiedUser] Failed to trigger sync:', error);
-          }
-        }, 2000);
-      }
-      
       // CRITICAL: Always sync local data when signing in if user is premium
       // This ensures data sync works for users who sign in (not just sign up)
       if (isPremium && hasLocalData) {
@@ -2431,21 +2387,12 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
     
     // If user just became premium, trigger ambition data sync
     if (justBecamePremium && !user.isGuest) {
-      console.log('[UnifiedUser] 🎉 User just became premium from free - triggering ambition data sync...');
-      console.log('[UnifiedUser] Previous subscription:', {
-        plan: user.subscriptionPlan,
-        status: user.subscriptionStatus,
-      });
-      console.log('[UnifiedUser] New subscription:', {
-        plan: subscriptionData.plan,
-        status: subscriptionData.status,
-        expiresAt: subscriptionData.expiresAt,
-      });
-      // Use event emitter to trigger sync in ambition store with premium flag
+      console.log('[UnifiedUser] User just became premium, triggering ambition data sync...');
+      // Use event emitter to trigger sync in ambition store
       setTimeout(() => {
         try {
-          DeviceEventEmitter.emit('ambition-sync-trigger', { forceSync: true, isPremium: true });
-          console.log('[UnifiedUser] ✅ Triggered ambition data sync with premium flag');
+          DeviceEventEmitter.emit('ambition-sync-trigger');
+          console.log('[UnifiedUser] ✅ Triggered ambition data sync');
         } catch (error) {
           console.warn('[UnifiedUser] Failed to trigger ambition sync:', error);
         }
