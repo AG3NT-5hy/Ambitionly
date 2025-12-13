@@ -9,7 +9,7 @@ import { useUi } from '../providers/UiProvider';
 import { analytics } from '../lib/analytics';
 import { useUnifiedUser } from '../lib/unified-user-store';
 import { router } from 'expo-router';
-import Purchases from 'react-native-purchases';
+import Purchases, { PURCHASES_ERROR_CODE } from 'react-native-purchases';
 
 interface TrailSegment {
   x: Animated.Value;
@@ -631,57 +631,114 @@ export default function PaywallScreen({ onClose, onSubscribe, onShowSignUp }: Pa
 
     try {
       // Try RevenueCat SDK first
+      // NOTE: This payment verification only applies to RevenueCat purchases via PaywallScreen.
+      // Admin grant premium (dev-settings) bypasses this flow and updates database directly.
       try {
         const { customerInfo } = await Purchases.purchasePackage(pkg);
-        if (customerInfo.entitlements.active.premium_access) {
-          // Sync subscription state with RevenueCat
-          await syncRevenueCatStatus();
-          
-          // Update unified user store with subscription info
-          const entitlement = customerInfo.entitlements.active.premium_access;
-          let plan: SubscriptionPlan = 'annual';
-          const productId = entitlement.productIdentifier?.toLowerCase() || '';
-          if (productId.includes('monthly') || productId.includes('month')) {
-            plan = 'monthly';
-          } else if (productId.includes('annual') || productId.includes('year')) {
-            plan = 'annual';
-          } else if (productId.includes('lifetime')) {
-            plan = 'lifetime';
-          }
-          
-          try {
-            await updateSubscription({
-              plan,
-              status: 'active',
-              expiresAt: entitlement.expirationDate ? new Date(entitlement.expirationDate) : null,
-              purchasedAt: entitlement.originalPurchaseDate ? new Date(entitlement.originalPurchaseDate) : new Date(),
-            });
-            
-            // Trigger data sync after subscription update
-            setTimeout(() => {
-              try {
-                const { DeviceEventEmitter } = require('react-native');
-                DeviceEventEmitter.emit('ambition-sync-trigger');
-                console.log('[Paywall] ✅ Triggered data sync after purchase');
-              } catch (e) {
-                console.warn('[Paywall] Failed to trigger sync:', e);
-              }
-            }, 1000);
-          } catch (error) {
-            console.warn('[Paywall] Failed to update unified user subscription:', error);
-          }
-          
-          showToast('✅ Premium unlocked!', 'success');
-          setPurchaseCompleted(true);
-          analytics.track('purchase_succeeded', { productId: pkg.identifier });
-          // Don't automatically call onSubscribe - let user click "Start Your Journey"
-          // onSubscribe(); // Commented out to prevent automatic activation
-        } else {
-          showToast('Purchase completed but premium not activated', 'warning');
+        
+        // CRITICAL: Verify purchase was actually successful by checking entitlement
+        // Only grant premium if entitlement is active and valid
+        // This prevents granting premium when user cancels payment or payment fails
+        const entitlement = customerInfo.entitlements.active.premium_access;
+        
+        if (!entitlement) {
+          console.log('[Paywall] ⚠️ Purchase completed but no active entitlement found');
+          showToast('Purchase completed but premium not activated. Please contact support.', 'warning');
+          analytics.track('purchase_failed', { productId: pkg.identifier, error: 'No active entitlement' });
+          return;
         }
+        
+        // Verify entitlement is actually active (not expired or revoked)
+        const isEntitlementActive = entitlement.isActive === true;
+        const hasValidExpiration = !entitlement.expirationDate || new Date(entitlement.expirationDate) > new Date();
+        
+        if (!isEntitlementActive || !hasValidExpiration) {
+          console.log('[Paywall] ⚠️ Entitlement found but not active or expired:', {
+            isActive: isEntitlementActive,
+            expirationDate: entitlement.expirationDate,
+            hasValidExpiration,
+          });
+          showToast('Purchase completed but premium not activated. Please contact support.', 'warning');
+          analytics.track('purchase_failed', { productId: pkg.identifier, error: 'Entitlement not active' });
+          return;
+        }
+        
+        // Purchase was successful - grant premium
+        console.log('[Paywall] ✅ Purchase verified successfully, granting premium');
+        
+        // Sync subscription state with RevenueCat
+        await syncRevenueCatStatus();
+        
+        // Update unified user store with subscription info
+        let plan: SubscriptionPlan = 'annual';
+        const productId = entitlement.productIdentifier?.toLowerCase() || '';
+        if (productId.includes('monthly') || productId.includes('month')) {
+          plan = 'monthly';
+        } else if (productId.includes('annual') || productId.includes('year')) {
+          plan = 'annual';
+        } else if (productId.includes('lifetime')) {
+          plan = 'lifetime';
+        }
+        
+        try {
+          await updateSubscription({
+            plan,
+            status: 'active',
+            expiresAt: entitlement.expirationDate ? new Date(entitlement.expirationDate) : null,
+            purchasedAt: entitlement.originalPurchaseDate ? new Date(entitlement.originalPurchaseDate) : new Date(),
+          });
+          
+          // Trigger data sync after subscription update
+          setTimeout(() => {
+            try {
+              const { DeviceEventEmitter } = require('react-native');
+              DeviceEventEmitter.emit('ambition-sync-trigger');
+              console.log('[Paywall] ✅ Triggered data sync after purchase');
+            } catch (e) {
+              console.warn('[Paywall] Failed to trigger sync:', e);
+            }
+          }, 1000);
+        } catch (error) {
+          console.warn('[Paywall] Failed to update unified user subscription:', error);
+        }
+        
+        showToast('✅ Premium unlocked!', 'success');
+        setPurchaseCompleted(true);
+        analytics.track('purchase_succeeded', { productId: pkg.identifier });
+        // Don't automatically call onSubscribe - let user click "Start Your Journey"
+        // onSubscribe(); // Commented out to prevent automatic activation
         return;
-      } catch (e) {
-        console.log("RevenueCat purchase failed, using fallback:", e);
+      } catch (purchaseError: any) {
+        // Check if user cancelled the purchase
+        const isUserCancelled = purchaseError?.userCancelled === true || 
+                                purchaseError?.code === PURCHASES_ERROR_CODE.PURCHASE_CANCELLED ||
+                                purchaseError?.code === 'PURCHASE_CANCELLED';
+        
+        if (isUserCancelled) {
+          console.log('[Paywall] User cancelled purchase');
+          // Don't show error for user cancellation - it's expected behavior
+          analytics.track('purchase_cancelled', { productId: pkg.identifier });
+          return;
+        }
+        
+        // Check for other specific error codes
+        const isNetworkError = purchaseError?.code === PURCHASES_ERROR_CODE.NETWORK_ERROR ||
+                              purchaseError?.code === 'NETWORK_ERROR';
+        
+        if (isNetworkError) {
+          console.log('[Paywall] Network error during purchase:', purchaseError);
+          showToast('Network error. Please check your connection and try again.', 'error');
+          analytics.track('purchase_failed', { productId: pkg.identifier, error: 'Network error' });
+          return;
+        }
+        
+        // Other purchase errors
+        console.log("[Paywall] RevenueCat purchase failed, using fallback:", purchaseError);
+        analytics.track('purchase_failed', { 
+          productId: pkg.identifier, 
+          error: purchaseError?.message || 'Unknown error',
+          code: purchaseError?.code 
+        });
       }
       
       // Fallback: Use the regular purchase handler

@@ -73,16 +73,38 @@ export const createUserProcedure = protectedProcedure
       
       // Guest data migration - only update if provided
       if (input.guestData) {
-        if (input.guestData.goal !== undefined) userData.goal = input.guestData.goal;
-        if (input.guestData.timeline !== undefined) userData.timeline = input.guestData.timeline;
-        if (input.guestData.timeCommitment !== undefined) userData.timeCommitment = input.guestData.timeCommitment;
-        if (input.guestData.answers !== undefined) userData.answers = input.guestData.answers;
-        if (input.guestData.roadmap !== undefined) userData.roadmap = input.guestData.roadmap;
-        if (input.guestData.completedTasks !== undefined) userData.completedTasks = input.guestData.completedTasks;
-        if (input.guestData.streakData !== undefined) userData.streakData = input.guestData.streakData;
-        if (input.guestData.taskTimers !== undefined) userData.taskTimers = input.guestData.taskTimers;
+        // CRITICAL: Only save goal/roadmap data if user has premium subscription
+        // Free users' data stays local only and is not synced to database
+        const subscriptionPlan = input.guestData.subscriptionPlan || 'free';
+        const subscriptionStatus = input.guestData.subscriptionStatus || 'inactive';
+        const subscriptionExpiresAt = input.guestData.subscriptionExpiresAt 
+          ? new Date(input.guestData.subscriptionExpiresAt) 
+          : null;
         
-        // Subscription data
+        const isLifetime = subscriptionPlan === 'lifetime';
+        const isMonthlyOrAnnual = subscriptionPlan === 'monthly' || subscriptionPlan === 'annual';
+        const hasValidExpiration = !subscriptionExpiresAt || subscriptionExpiresAt > new Date();
+        const isPremium = subscriptionPlan !== 'free' && 
+                         subscriptionStatus === 'active' &&
+                         (isLifetime || (isMonthlyOrAnnual && hasValidExpiration));
+        
+        if (isPremium) {
+          // User has premium - save goal/roadmap data
+          if (input.guestData.goal !== undefined) userData.goal = input.guestData.goal;
+          if (input.guestData.timeline !== undefined) userData.timeline = input.guestData.timeline;
+          if (input.guestData.timeCommitment !== undefined) userData.timeCommitment = input.guestData.timeCommitment;
+          if (input.guestData.answers !== undefined) userData.answers = input.guestData.answers;
+          if (input.guestData.roadmap !== undefined) userData.roadmap = input.guestData.roadmap;
+          if (input.guestData.completedTasks !== undefined) userData.completedTasks = input.guestData.completedTasks;
+          if (input.guestData.streakData !== undefined) userData.streakData = input.guestData.streakData;
+          if (input.guestData.taskTimers !== undefined) userData.taskTimers = input.guestData.taskTimers;
+          console.log('[User.Create] ✅ Premium user - saving goal/roadmap data to database');
+        } else {
+          // Free user - do NOT save goal/roadmap data to database
+          console.log('[User.Create] ⚠️ Free user - NOT saving goal/roadmap data to database (stays local only)');
+        }
+        
+        // Subscription data - ALWAYS sync subscription status regardless of premium
         if (input.guestData.subscriptionPlan !== undefined) {
           userData.subscriptionPlan = input.guestData.subscriptionPlan || 'free';
         }
@@ -90,9 +112,7 @@ export const createUserProcedure = protectedProcedure
           userData.subscriptionStatus = input.guestData.subscriptionStatus || 'inactive';
         }
         if (input.guestData.subscriptionExpiresAt !== undefined) {
-          userData.subscriptionExpiresAt = input.guestData.subscriptionExpiresAt 
-            ? new Date(input.guestData.subscriptionExpiresAt) 
-            : null;
+          userData.subscriptionExpiresAt = subscriptionExpiresAt;
         }
         if (input.guestData.subscriptionPurchasedAt !== undefined) {
           userData.subscriptionPurchasedAt = input.guestData.subscriptionPurchasedAt 
