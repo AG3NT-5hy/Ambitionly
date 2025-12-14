@@ -158,6 +158,8 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         isRegistered: userSession.isRegistered,
         email: userSession.email ? `${userSession.email.substring(0, 5)}...` : 'none',
         hasPremium: userSession.hasPremium,
+        forceSync,
+        isPremiumFromEvent,
       });
       
       if (!userSession.isRegistered || !userSession.email) {
@@ -167,32 +169,46 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
       
       // CRITICAL: Only sync roadmap/goal data if user has premium subscription
       // This ensures free users' data stays local only
-      // EXCEPTION: If forceSync is true, bypass premium check and sync anyway (for dev/admin purposes)
+      // EXCEPTION: If forceSync is true, bypass premium check and sync anyway (for dev/admin purposes and updates)
       // If forceSync is true and we have premium status from event, use that instead of checking
       const hasPremium =
         isPremiumFromEvent === true
           ? true
           : userSession.hasPremium;
       
-      // If forceSync is true, allow syncing even without premium (for dev/admin purposes)
+      console.log('[Ambition] Premium check result:', {
+        hasPremium,
+        isPremiumFromEvent,
+        userSessionHasPremium: userSession.hasPremium,
+        forceSync,
+        willSync: hasPremium || forceSync,
+      });
+      
+      // CRITICAL: If forceSync is true, always allow syncing (for updates, resets, and dev/admin purposes)
+      // This ensures that task completions, progress resets, and other updates always sync
       if (!hasPremium && !forceSync) {
         console.log('[Ambition] ⚠️ User does not have premium subscription, skipping cloud sync');
         console.log('[Ambition] Note: Roadmap/goal data is NOT saved to database for free users');
         console.log('[Ambition] Note: Subscription data is synced separately via unified-user-store');
-        console.log('[Ambition] Note: Use force sync in dev settings to bypass this check');
+        console.log('[Ambition] Note: Updates (task completion, reset) will use forceSync to bypass this check');
         return;
       }
       
       if (!hasPremium && forceSync) {
-        console.log('[Ambition] ⚠️ Force sync enabled - syncing data despite non-premium status (dev/admin mode)');
+        console.log('[Ambition] ✅ Force sync enabled - syncing data for registered user (updates/resets)');
+      }
+      
+      if (hasPremium) {
+        console.log('[Ambition] ✅ Premium user - proceeding with sync');
       }
       
       syncInProgressRef.current = true;
       console.log('[Ambition] Syncing data to database (premium user)...');
       console.log('[Ambition] Store hydration status:', { isHydrated });
       
-      // CRITICAL: If store isn't hydrated yet, read directly from AsyncStorage
-      // This prevents syncing empty values and clearing the database
+      // CRITICAL: Always read from AsyncStorage to get the latest data
+      // This ensures we sync the most recent values, especially after updates like task completion
+      // State values might be stale if React hasn't re-rendered yet
       let syncGoal: string | null = null;
       let syncTimeline: string | null = null;
       let syncTimeCommitment: string | null = null;
@@ -202,78 +218,90 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
       let syncStreakData: string | null = null;
       let syncTaskTimers: string | null = null;
       
-      if (!isHydrated) {
-        console.log('[Ambition] ⚠️ Store not hydrated yet, reading from AsyncStorage...');
-        try {
-          const [
-            storedGoal,
-            storedTimeline,
-            storedTimeCommitment,
-            storedAnswers,
-            storedRoadmap,
-            storedCompletedTasks,
-            storedStreakData,
-            storedTaskTimers,
-          ] = await Promise.all([
-            AsyncStorage.getItem(STORAGE_KEYS.GOAL),
-            AsyncStorage.getItem(STORAGE_KEYS.TIMELINE),
-            AsyncStorage.getItem(STORAGE_KEYS.TIME_COMMITMENT),
-            AsyncStorage.getItem(STORAGE_KEYS.ANSWERS),
-            AsyncStorage.getItem(STORAGE_KEYS.ROADMAP),
-            AsyncStorage.getItem(STORAGE_KEYS.COMPLETED_TASKS),
-            AsyncStorage.getItem(STORAGE_KEYS.STREAK_DATA),
-            AsyncStorage.getItem(STORAGE_KEYS.TASK_TIMERS),
-          ]);
-          
-          syncGoal = storedGoal || null;
-          syncTimeline = storedTimeline || null;
-          syncTimeCommitment = storedTimeCommitment || null;
-          syncAnswers = storedAnswers || null;
-          syncRoadmap = storedRoadmap || null;
-          syncCompletedTasks = storedCompletedTasks || null;
-          syncStreakData = storedStreakData || null;
-          syncTaskTimers = storedTaskTimers || null;
-          
-          console.log('[Ambition] Read from AsyncStorage:', {
-            hasGoal: !!syncGoal,
-            hasRoadmap: !!syncRoadmap,
-            hasTimeline: !!syncTimeline,
-            hasTimeCommitment: !!syncTimeCommitment,
-          });
-        } catch (storageError) {
-          console.error('[Ambition] Failed to read from AsyncStorage, using state values:', storageError);
-          // Fallback to state values if AsyncStorage read fails
-          syncGoal = goal || null;
-          syncTimeline = timeline || null;
-          syncTimeCommitment = timeCommitment || null;
-          syncAnswers = answers.length > 0 ? JSON.stringify(answers) : null;
-          syncRoadmap = roadmap ? JSON.stringify(roadmap) : null;
-          syncCompletedTasks = completedTasks.length > 0 ? JSON.stringify(completedTasks) : null;
-          syncStreakData = streakData.streak > 0 ? JSON.stringify(streakData) : null;
-          syncTaskTimers = taskTimers.length > 0 ? JSON.stringify(taskTimers) : null;
-        }
-      } else {
-        // Store is hydrated, use state values
+      console.log('[Ambition] Reading latest data from AsyncStorage for sync...');
+      try {
+        const [
+          storedGoal,
+          storedTimeline,
+          storedTimeCommitment,
+          storedAnswers,
+          storedRoadmap,
+          storedCompletedTasks,
+          storedStreakData,
+          storedTaskTimers,
+        ] = await Promise.all([
+          AsyncStorage.getItem(STORAGE_KEYS.GOAL),
+          AsyncStorage.getItem(STORAGE_KEYS.TIMELINE),
+          AsyncStorage.getItem(STORAGE_KEYS.TIME_COMMITMENT),
+          AsyncStorage.getItem(STORAGE_KEYS.ANSWERS),
+          AsyncStorage.getItem(STORAGE_KEYS.ROADMAP),
+          AsyncStorage.getItem(STORAGE_KEYS.COMPLETED_TASKS),
+          AsyncStorage.getItem(STORAGE_KEYS.STREAK_DATA),
+          AsyncStorage.getItem(STORAGE_KEYS.TASK_TIMERS),
+        ]);
+        
+        syncGoal = storedGoal || null;
+        syncTimeline = storedTimeline || null;
+        syncTimeCommitment = storedTimeCommitment || null;
+        syncAnswers = storedAnswers || null;
+        syncRoadmap = storedRoadmap || null;
+        // For completedTasks, streakData, and taskTimers, use stored values or default to empty
+        // This allows clearing them from database when resetting progress
+        syncCompletedTasks = storedCompletedTasks || JSON.stringify([]);
+        syncStreakData = storedStreakData || JSON.stringify({ lastCompletionDate: '', streak: 0 });
+        syncTaskTimers = storedTaskTimers || JSON.stringify([]);
+        
+        console.log('[Ambition] ✅ Read from AsyncStorage:', {
+          hasGoal: !!syncGoal,
+          hasRoadmap: !!syncRoadmap,
+          hasTimeline: !!syncTimeline,
+          hasTimeCommitment: !!syncTimeCommitment,
+          hasCompletedTasks: !!syncCompletedTasks,
+          completedTasksCount: syncCompletedTasks ? JSON.parse(syncCompletedTasks).length : 0,
+          hasStreakData: !!syncStreakData,
+          hasTaskTimers: !!syncTaskTimers,
+          taskTimersCount: syncTaskTimers ? JSON.parse(syncTaskTimers).length : 0,
+        });
+      } catch (storageError) {
+        console.error('[Ambition] ❌ Failed to read from AsyncStorage, using state values as fallback:', storageError);
+        // Fallback to state values if AsyncStorage read fails
         syncGoal = goal || null;
         syncTimeline = timeline || null;
         syncTimeCommitment = timeCommitment || null;
         syncAnswers = answers.length > 0 ? JSON.stringify(answers) : null;
         syncRoadmap = roadmap ? JSON.stringify(roadmap) : null;
-        syncCompletedTasks = completedTasks.length > 0 ? JSON.stringify(completedTasks) : null;
-        syncStreakData = streakData.streak > 0 ? JSON.stringify(streakData) : null;
-        syncTaskTimers = taskTimers.length > 0 ? JSON.stringify(taskTimers) : null;
+        // For completedTasks, streakData, and taskTimers, always include them (even if empty)
+        // This allows clearing them from database when resetting progress
+        syncCompletedTasks = JSON.stringify(completedTasks);
+        syncStreakData = JSON.stringify(streakData);
+        syncTaskTimers = JSON.stringify(taskTimers);
+        console.warn('[Ambition] ⚠️ Using state values (may be stale):', {
+          completedTasksCount: completedTasks.length,
+          taskTimersCount: taskTimers.length,
+        });
       }
       
-      // CRITICAL: Only sync roadmap/goal data if we actually have local data
+      // CRITICAL: Only sync if we actually have local data to sync
       // Don't send null values if we don't have local data - this prevents clearing the database
       // We should only sync if:
-      // 1. We have local data to sync (goal or roadmap exists), OR
-      // 2. We're explicitly updating subscription data (which is handled separately)
-      const hasLocalData = !!(syncGoal || syncRoadmap);
+      // 1. We have local data to sync (goal, roadmap, completedTasks, streakData, taskTimers, etc.), OR
+      // 2. We're explicitly forcing sync (forceSync = true)
+      // 3. We're updating subscription data (which is handled separately)
+      const hasLocalData = !!(syncGoal || syncRoadmap || syncCompletedTasks || syncStreakData || syncTaskTimers || syncTimeline || syncTimeCommitment || syncAnswers);
       
       if (!hasLocalData && !forceSync) {
-        console.log('[Ambition] ⚠️ No local roadmap/goal data to sync, skipping data sync (subscription will still sync separately)');
+        console.log('[Ambition] ⚠️ No local data to sync, skipping data sync (subscription will still sync separately)');
         console.log('[Ambition] This prevents clearing existing database data when store is not hydrated');
+        console.log('[Ambition] Local data check:', {
+          hasGoal: !!syncGoal,
+          hasRoadmap: !!syncRoadmap,
+          hasCompletedTasks: !!syncCompletedTasks,
+          hasStreakData: !!syncStreakData,
+          hasTaskTimers: !!syncTaskTimers,
+          hasTimeline: !!syncTimeline,
+          hasTimeCommitment: !!syncTimeCommitment,
+          hasAnswers: !!syncAnswers,
+        });
         // Don't sync empty values - just return
         // Subscription data is synced separately via unified-user-store
         syncInProgressRef.current = false;
@@ -306,15 +334,25 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         email: userSession.email,
       };
       
-      // Only include roadmap/goal fields if they have actual data
+      // Include roadmap/goal fields if they have actual data
       if (syncGoal) syncPayload.goal = syncGoal;
       if (syncTimeline) syncPayload.timeline = syncTimeline;
       if (syncTimeCommitment) syncPayload.timeCommitment = syncTimeCommitment;
       if (syncAnswers) syncPayload.answers = syncAnswers;
       if (syncRoadmap) syncPayload.roadmap = syncRoadmap;
-      if (syncCompletedTasks) syncPayload.completedTasks = syncCompletedTasks;
-      if (syncStreakData) syncPayload.streakData = syncStreakData;
-      if (syncTaskTimers) syncPayload.taskTimers = syncTaskTimers;
+      
+      // Always include completedTasks, streakData, and taskTimers
+      // These are always synced (even if empty arrays/objects) to allow clearing them from database when resetting progress
+      // They are always defined as JSON strings (never null) when store is hydrated
+      if (syncCompletedTasks !== undefined && syncCompletedTasks !== null) {
+        syncPayload.completedTasks = syncCompletedTasks;
+      }
+      if (syncStreakData !== undefined && syncStreakData !== null) {
+        syncPayload.streakData = syncStreakData;
+      }
+      if (syncTaskTimers !== undefined && syncTaskTimers !== null) {
+        syncPayload.taskTimers = syncTaskTimers;
+      }
       
       // Always include subscription data (can be null/undefined)
       if (subscriptionPlan !== undefined) syncPayload.subscriptionPlan = subscriptionPlan;
@@ -334,6 +372,16 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
       });
       
       // Use mutateAsync for proper async handling
+      console.log('[Ambition] Calling updateUserMutation with payload:', {
+        email: syncPayload.email,
+        hasGoal: !!syncPayload.goal,
+        hasRoadmap: !!syncPayload.roadmap,
+        hasCompletedTasks: !!syncPayload.completedTasks,
+        hasStreakData: !!syncPayload.streakData,
+        hasTaskTimers: !!syncPayload.taskTimers,
+        completedTasksCount: syncPayload.completedTasks ? JSON.parse(syncPayload.completedTasks).length : 0,
+      });
+      
       const result = await updateUserMutation.mutateAsync(syncPayload);
       
       lastSyncTimeRef.current = Date.now();
@@ -345,6 +393,12 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         updatedAt: result.user?.updatedAt,
         lastSyncAt: result.user?.lastSyncAt,
       });
+      
+      // Verify the sync was successful
+      if (!result.success) {
+        console.error('[Ambition] ❌ Sync returned success: false', result);
+        throw new Error('Sync failed: mutation returned success: false');
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const errorStack = error instanceof Error ? error.stack : undefined;
@@ -659,9 +713,28 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     const syncTriggerHandler = (eventData?: { forceSync?: boolean; isPremium?: boolean }) => {
       console.log('[Ambition] Received premium upgrade trigger, syncing data...', eventData);
       // If forceSync is true, we'll retry even if premium check initially fails
-      syncAmbitionDataToDatabase(eventData?.forceSync, eventData?.isPremium);
+      // Add a small delay to ensure user session is available
+      setTimeout(() => {
+        syncAmbitionDataToDatabase(eventData?.forceSync, eventData?.isPremium);
+      }, 500);
     };
     const syncSubscription = DeviceEventEmitter.addListener('ambition-sync-trigger', syncTriggerHandler);
+    
+    // Listen for roadmap generation completion to ensure sync happens
+    const roadmapGeneratedHandler = async () => {
+      console.log('[Ambition] Roadmap generation completed, ensuring sync happens...');
+      // Wait a moment to ensure roadmap is saved to storage
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Check if user is registered and trigger sync
+      const userSession = await checkUserSession();
+      if (userSession.isRegistered && userSession.email) {
+        console.log('[Ambition] User is registered, triggering sync after roadmap generation...');
+        syncAmbitionDataToDatabase(true); // Use forceSync to ensure it works
+      } else {
+        console.log('[Ambition] User not registered yet, skipping sync after roadmap generation');
+      }
+    };
+    const roadmapGeneratedSubscription = DeviceEventEmitter.addListener('ambition-roadmap-generated', roadmapGeneratedHandler);
     
     // Listen for realtime database updates
     const databaseUpdateHandler = async (updateData: {
@@ -822,11 +895,12 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     };
     const databaseUpdateSubscription = DeviceEventEmitter.addListener('ambition-database-update', databaseUpdateHandler);
     
-    return () => {
+      return () => {
       reloadSubscription.remove();
       clearSubscription.remove();
       syncSubscription.remove();
       databaseUpdateSubscription.remove();
+      roadmapGeneratedSubscription.remove();
     };
   }, [loadDataFromStorage, syncAmbitionDataToDatabase]);
 
@@ -1218,8 +1292,28 @@ Output ONLY valid JSON in this exact format:
       console.log('Roadmap generated successfully');
       analytics.trackRoadmapGenerated(sanitizedGoal, sanitizedTimeline, sanitizedTimeCommitment);
       
-      // Sync to database immediately (roadmap generation is important)
-      await syncAmbitionDataToDatabase(true);
+      // CRITICAL: Sync to database immediately after roadmap generation
+      // This ensures data is synced for users who signed in and then completed onboarding
+      // Use forceSync: true to bypass premium check and ensure sync works for all registered users
+      console.log('[Ambition] Syncing roadmap to database after generation...');
+      try {
+        // Wait a moment to ensure user session is fully set up and roadmap is saved
+        await new Promise(resolve => setTimeout(resolve, 500));
+        await syncAmbitionDataToDatabase(true);
+        console.log('[Ambition] ✅ Roadmap sync initiated after generation');
+      } catch (syncError) {
+        console.error('[Ambition] ❌ Error syncing roadmap after generation:', syncError);
+        // Don't throw - roadmap generation succeeded, sync can retry later
+        // The periodic sync or app state change will retry the sync
+      }
+      
+      // Also emit event to trigger sync via listener (as a backup)
+      try {
+        DeviceEventEmitter.emit('ambition-roadmap-generated');
+        console.log('[Ambition] ✅ Emitted roadmap-generated event');
+      } catch (e) {
+        console.warn('[Ambition] Could not emit roadmap-generated event:', e);
+      }
     } catch (error) {
       console.error('Error generating roadmap:', error);
       const msg = error instanceof AppError ? error.message : (error as Error)?.message ?? 'Unexpected error';

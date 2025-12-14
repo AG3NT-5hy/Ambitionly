@@ -2075,6 +2075,29 @@ export const [UnifiedUserProvider, useUnifiedUser] = createContextHook(() => {
       } else if (!isPremium && hasLocalData) {
         console.log('[UnifiedUser] Non-premium user signed in with local data - data will stay local only');
         // Non-premium users' data stays local only
+      } else if (isPremium && !hasLocalData && !serverHasData) {
+        // CRITICAL: Premium user signed in without local or server data
+        // This means they'll go through onboarding - we need to ensure sync works after onboarding
+        // Set up a listener to sync data after roadmap is generated
+        console.log('[UnifiedUser] Premium user signed in without data - will sync after onboarding completes');
+        // The sync will be triggered automatically when generateRoadmap is called (it uses forceSync: true)
+        // But we'll also set up a delayed sync as a backup
+        setTimeout(() => {
+          try {
+            // Check if roadmap was created after sign in
+            AsyncStorage.getItem(STORAGE_KEYS.ROADMAP).then((roadmap) => {
+              if (roadmap) {
+                console.log('[UnifiedUser] Roadmap found after sign in, triggering sync...');
+                DeviceEventEmitter.emit('ambition-sync-trigger', { forceSync: true, isPremium: true });
+                console.log('[UnifiedUser] ✅ Emitted sync event for premium user after onboarding');
+              }
+            }).catch((e) => {
+              console.warn('[UnifiedUser] Error checking for roadmap:', e);
+            });
+          } catch (e) {
+            console.warn('[UnifiedUser] Could not set up post-onboarding sync:', e);
+          }
+        }, 10000); // Check after 10 seconds (should be enough for onboarding to complete)
       }
       
       console.log('[UnifiedUser] ✅ Sign in complete');
