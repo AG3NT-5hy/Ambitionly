@@ -1,7 +1,7 @@
 import createContextHook from '@nkzw/create-context-hook';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { AppState, AppStateStatus } from 'react-native';
+import { AppState, AppStateStatus, DeviceEventEmitter } from 'react-native';
 import { httpRequest } from '@/lib/http';
 import { useUi } from '@/providers/UiProvider';
 import { AppError } from '@/lib/errors';
@@ -67,6 +67,7 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
   const [timeCommitment, setTimeCommitmentState] = useState<string>('');
   const [answers, setAnswersState] = useState<string[]>([]);
   const [roadmap, setRoadmapState] = useState<Roadmap | null>(null);
+  const [isDirty, setIsDirty] = useState<boolean>(false);
   const [completedTasks, setCompletedTasksState] = useState<string[]>([]);
   const [streakData, setStreakDataState] = useState<{ lastCompletionDate: string; streak: number }>({
     lastCompletionDate: '',
@@ -78,9 +79,10 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
   const isGeneratingRoadmapRef = useRef(false);
   const syncInProgressRef = useRef(false);
   const lastSyncTimeRef = useRef<number>(0);
-  const syncDebounceTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const periodicSyncIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const syncDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const periodicSyncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const pendingSigninHydrationSyncRef = useRef<boolean>(false);
   
   // tRPC mutation for syncing data (must be at hook level)
   const updateUserMutation = trpc.user.update.useMutation();
@@ -137,7 +139,19 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
   // Sync ambition data to database (ONLY for premium users)
   // CRITICAL: Roadmap/goal data is ONLY saved to database if user has premium subscription
   // Non-premium users' data stays local only
-  const syncAmbitionDataToDatabase = useCallback(async (forceSync: boolean = false, isPremiumFromEvent: boolean | undefined = undefined, retryCount: number = 0) => {
+  const syncAmbitionDataToDatabase = useCallback(async (options?: { forceSync?: boolean; isPremiumFromEvent?: boolean; retryCount?: number; reason?: string }) => {
+    const forceSync = options?.forceSync ?? false;
+    const isPremiumFromEvent = options?.isPremiumFromEvent;
+    const retryCount = options?.retryCount ?? 0;
+    const reason = options?.reason;
+    
+    console.log('[SYNC] triggered', {
+      reason,
+      forceSync,
+      isDirty,
+      hasLocalData: 'unknown',
+      hasPremium: 'unknown',
+    });
     // Prevent concurrent syncs (unless forced and retrying)
     if (syncInProgressRef.current && !(forceSync && retryCount > 0)) {
       console.log('[Ambition] Sync already in progress, skipping');
@@ -149,7 +163,12 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
       console.log('[Ambition] App not active, skipping sync');
       return;
     }
-    
+
+    // Dirty guard - skip if nothing changed unless forceSync
+    if (!isDirty && !forceSync) {
+      console.log('[Ambition] Not dirty and not forceSync - skipping sync');
+      return;
+    }
     try {
       console.log('[Ambition] 🔄 Starting sync to database...', { forceSync, isPremiumFromEvent, retryCount });
       const userSession = await checkUserSession();
@@ -184,8 +203,15 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         willSync: hasPremium || forceSync,
       });
       
+      console.log('[SYNC] triggered', {
+        reason,
+        forceSync,
+        isDirty,
+        hasLocalData: 'pending',
+        hasPremium,
+      });
+      
       // CRITICAL: If forceSync is true, always allow syncing (for updates, resets, and dev/admin purposes)
-      // This ensures that task completions, progress resets, and other updates always sync
       if (!hasPremium && !forceSync) {
         console.log('[Ambition] ⚠️ User does not have premium subscription, skipping cloud sync');
         console.log('[Ambition] Note: Roadmap/goal data is NOT saved to database for free users');
@@ -281,32 +307,9 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         });
       }
       
-      // CRITICAL: Only sync if we actually have local data to sync
-      // Don't send null values if we don't have local data - this prevents clearing the database
-      // We should only sync if:
-      // 1. We have local data to sync (goal, roadmap, completedTasks, streakData, taskTimers, etc.), OR
-      // 2. We're explicitly forcing sync (forceSync = true)
-      // 3. We're updating subscription data (which is handled separately)
+      // Track whether we have any local data (for logging only)
       const hasLocalData = !!(syncGoal || syncRoadmap || syncCompletedTasks || syncStreakData || syncTaskTimers || syncTimeline || syncTimeCommitment || syncAnswers);
-      
-      if (!hasLocalData && !forceSync) {
-        console.log('[Ambition] ⚠️ No local data to sync, skipping data sync (subscription will still sync separately)');
-        console.log('[Ambition] This prevents clearing existing database data when store is not hydrated');
-        console.log('[Ambition] Local data check:', {
-          hasGoal: !!syncGoal,
-          hasRoadmap: !!syncRoadmap,
-          hasCompletedTasks: !!syncCompletedTasks,
-          hasStreakData: !!syncStreakData,
-          hasTaskTimers: !!syncTaskTimers,
-          hasTimeline: !!syncTimeline,
-          hasTimeCommitment: !!syncTimeCommitment,
-          hasAnswers: !!syncAnswers,
-        });
-        // Don't sync empty values - just return
-        // Subscription data is synced separately via unified-user-store
-        syncInProgressRef.current = false;
-        return;
-      }
+      console.log('[SYNC] data state', { reason, forceSync, isDirty, hasLocalData, hasPremium });
       
       // Get subscription data from unified user store
       let subscriptionPlan: string | undefined;
@@ -369,6 +372,10 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         completedTasksCount: syncPayload.completedTasks ? JSON.parse(syncPayload.completedTasks).length : 0,
         subscriptionPlan: syncPayload.subscriptionPlan,
         subscriptionStatus: syncPayload.subscriptionStatus,
+        reason,
+        isDirty,
+        hasLocalData,
+        hasPremium,
       });
       
       // Use mutateAsync for proper async handling
@@ -380,6 +387,7 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         hasStreakData: !!syncPayload.streakData,
         hasTaskTimers: !!syncPayload.taskTimers,
         completedTasksCount: syncPayload.completedTasks ? JSON.parse(syncPayload.completedTasks).length : 0,
+        reason,
       });
       
       const result = await updateUserMutation.mutateAsync(syncPayload);
@@ -391,7 +399,7 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         userId: result.user?.id,
         email: result.user?.email,
         updatedAt: result.user?.updatedAt,
-        lastSyncAt: result.user?.lastSyncAt,
+        lastSyncAt: (result as any)?.user?.lastSyncAt,
       });
       
       // Verify the sync was successful
@@ -399,6 +407,9 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         console.error('[Ambition] ❌ Sync returned success: false', result);
         throw new Error('Sync failed: mutation returned success: false');
       }
+      
+      // Clear dirty flag after successful sync
+      setIsDirty(false);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const errorStack = error instanceof Error ? error.stack : undefined;
@@ -417,7 +428,7 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         if (retryCount < 3 && forceSync) {
           console.log('[Ambition] Retrying sync after network error in 5 seconds...');
           setTimeout(() => {
-            syncAmbitionDataToDatabase(forceSync, isPremiumFromEvent, retryCount + 1);
+            syncAmbitionDataToDatabase({ forceSync, isPremiumFromEvent, retryCount: retryCount + 1, reason });
           }, 5000);
           return; // Don't clear syncInProgress yet
         }
@@ -436,7 +447,7 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
   }, [goal, timeline, timeCommitment, answers, roadmap, completedTasks, streakData, taskTimers, updateUserMutation, isHydrated]);
   
   // Debounced sync function - waits 2 seconds after last change before syncing
-  const debouncedSync = useCallback((forceSync: boolean = false) => {
+  const debouncedSync = useCallback((forceSync: boolean = false, reason?: string) => {
     // Clear existing debounce timer
     if (syncDebounceTimerRef.current) {
       clearTimeout(syncDebounceTimerRef.current);
@@ -444,7 +455,7 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     
     // Set new debounce timer
     syncDebounceTimerRef.current = setTimeout(() => {
-      syncAmbitionDataToDatabase(forceSync);
+      syncAmbitionDataToDatabase({ forceSync, reason });
     }, 2000); // Wait 2 seconds after last change
   }, [syncAmbitionDataToDatabase]);
 
@@ -597,6 +608,15 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     };
   }, [isHydrated, loadDataFromStorage]);
 
+  // Trigger a one-time forced sync after sign-in hydration completes
+  useEffect(() => {
+    if (isHydrated && pendingSigninHydrationSyncRef.current) {
+      console.log('[Ambition] Sign-in hydration complete, triggering forced sync...');
+      pendingSigninHydrationSyncRef.current = false;
+      syncAmbitionDataToDatabase({ forceSync: true, reason: 'signin_hydration_complete' });
+    }
+  }, [isHydrated, syncAmbitionDataToDatabase]);
+
   // Monitor AppState and sync when app comes to foreground
   useEffect(() => {
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
@@ -614,7 +634,7 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
           console.log('[Ambition] App came to foreground, syncing data...');
           // Wait 2 seconds after app becomes active to ensure everything is ready
           setTimeout(() => {
-            syncAmbitionDataToDatabase(true);
+          syncAmbitionDataToDatabase({ forceSync: true, reason: 'app_foreground' });
           }, 2000);
         } else {
           console.log('[Ambition] App came to foreground, but last sync was recent (', Math.round(timeSinceLastSync / 1000), 'seconds ago)');
@@ -647,7 +667,7 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
         // Only sync if it's been more than 2 minutes since last sync
         if (timeSinceLastSync > twoMinutes) {
           console.log('[Ambition] Periodic sync triggered (2 minutes elapsed)');
-          syncAmbitionDataToDatabase(false);
+          syncAmbitionDataToDatabase({ forceSync: false, reason: 'periodic_sync' });
         } else {
           console.log('[Ambition] Periodic sync skipped (last sync was', Math.round(timeSinceLastSync / 1000), 'seconds ago)');
         }
@@ -665,6 +685,7 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
   useEffect(() => {
     const handleStorageReload = () => {
       console.log('[Ambition] Storage reload event received, reloading data...');
+      pendingSigninHydrationSyncRef.current = true;
       loadDataFromStorage();
     };
 
@@ -715,7 +736,7 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
       // If forceSync is true, we'll retry even if premium check initially fails
       // Add a small delay to ensure user session is available
       setTimeout(() => {
-        syncAmbitionDataToDatabase(eventData?.forceSync, eventData?.isPremium);
+        syncAmbitionDataToDatabase({ forceSync: eventData?.forceSync, isPremiumFromEvent: eventData?.isPremium, reason: 'event_ambition_sync_trigger' });
       }, 500);
     };
     const syncSubscription = DeviceEventEmitter.addListener('ambition-sync-trigger', syncTriggerHandler);
@@ -729,7 +750,7 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
       const userSession = await checkUserSession();
       if (userSession.isRegistered && userSession.email) {
         console.log('[Ambition] User is registered, triggering sync after roadmap generation...');
-        syncAmbitionDataToDatabase(true); // Use forceSync to ensure it works
+        syncAmbitionDataToDatabase({ forceSync: true, reason: 'roadmap_generated_event' }); // Use forceSync to ensure it works
       } else {
         console.log('[Ambition] User not registered yet, skipping sync after roadmap generation');
       }
@@ -1007,8 +1028,9 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     setGoalState(sanitized);
     await AsyncStorage.setItem(STORAGE_KEYS.GOAL, sanitized);
     console.log('[Ambition] ✅ Goal saved to storage:', sanitized.substring(0, 50) + '...');
-    // Sync to database (debounced)
-    debouncedSync();
+    // Sync to database
+    setIsDirty(true);
+    syncAmbitionDataToDatabase({ reason: 'goal_updated' });
   };
 
   const setTimeline = async (newTimeline: string) => {
@@ -1024,8 +1046,9 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     }
     setTimelineState(sanitized);
     await AsyncStorage.setItem(STORAGE_KEYS.TIMELINE, sanitized);
-    // Sync to database (debounced)
-    debouncedSync();
+    // Sync to database
+    setIsDirty(true);
+    syncAmbitionDataToDatabase({ reason: 'timeline_updated' });
   };
 
   const setTimeCommitment = async (newTimeCommitment: string) => {
@@ -1041,8 +1064,9 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     }
     setTimeCommitmentState(sanitized);
     await AsyncStorage.setItem(STORAGE_KEYS.TIME_COMMITMENT, sanitized);
-    // Sync to database (debounced)
-    debouncedSync();
+    // Sync to database
+    setIsDirty(true);
+    syncAmbitionDataToDatabase({ reason: 'time_commitment_updated' });
   };
 
   const addAnswer = async (answer: string) => {
@@ -1059,8 +1083,9 @@ export const [AmbitionProvider, useAmbition] = createContextHook(() => {
     const newAnswers = [...answers, sanitized];
     setAnswersState(newAnswers);
     await AsyncStorage.setItem(STORAGE_KEYS.ANSWERS, JSON.stringify(newAnswers));
-    // Sync to database (debounced)
-    debouncedSync();
+    // Sync to database
+    setIsDirty(true);
+    syncAmbitionDataToDatabase({ reason: 'answers_updated' });
   };
 
   const inferIndustry = (g: string, contextAnswers: string[]): string => {
@@ -1278,6 +1303,7 @@ Output ONLY valid JSON in this exact format:
       };
 
       setRoadmapState(processedRoadmap);
+      setIsDirty(true);
       await AsyncStorage.setItem(STORAGE_KEYS.ROADMAP, JSON.stringify(processedRoadmap));
       console.log('[Ambition] ✅ Roadmap saved to storage:', {
         phases: processedRoadmap.phases.length,
@@ -1299,7 +1325,7 @@ Output ONLY valid JSON in this exact format:
       try {
         // Wait a moment to ensure user session is fully set up and roadmap is saved
         await new Promise(resolve => setTimeout(resolve, 500));
-        await syncAmbitionDataToDatabase(true);
+        await syncAmbitionDataToDatabase({ forceSync: true, reason: 'roadmap_generated' });
         console.log('[Ambition] ✅ Roadmap sync initiated after generation');
       } catch (syncError) {
         console.error('[Ambition] ❌ Error syncing roadmap after generation:', syncError);
@@ -1345,6 +1371,7 @@ Output ONLY valid JSON in this exact format:
       };
 
       setRoadmapState(processedRoadmap);
+      setIsDirty(true);
       await AsyncStorage.setItem(STORAGE_KEYS.ROADMAP, JSON.stringify(processedRoadmap));
       
       // Clear all existing timers when generating a new roadmap (fallback case)
@@ -1353,7 +1380,7 @@ Output ONLY valid JSON in this exact format:
       await AsyncStorage.removeItem(STORAGE_KEYS.TASK_TIMERS);
       
       // Sync to database immediately (roadmap generation is important)
-      await syncAmbitionDataToDatabase(true);
+      await syncAmbitionDataToDatabase({ forceSync: true, reason: 'roadmap_generated_fallback' });
     } finally {
       isGeneratingRoadmapRef.current = false;
     }
@@ -1636,7 +1663,7 @@ Output ONLY valid JSON in this exact format:
     
     // Save to storage (timer is already in memory, so continue even if storage fails)
     try {
-    await AsyncStorage.setItem(STORAGE_KEYS.TASK_TIMERS, JSON.stringify(updatedTimers));
+      await AsyncStorage.setItem(STORAGE_KEYS.TASK_TIMERS, JSON.stringify(updatedTimers));
       console.log(`[Timer] Timer saved to storage successfully`);
     } catch (storageError) {
       console.error(`[Timer] Error saving timer to storage:`, storageError);
@@ -1644,6 +1671,7 @@ Output ONLY valid JSON in this exact format:
       // Log warning but don't throw - timer functionality is not affected
       console.warn(`[Timer] ⚠️ Timer started but may not persist after app restart`);
     }
+    setIsDirty(true);
     
     console.log(`[Timer] Timer started successfully for task ${taskId}`);
     console.log(`[Timer] All timers after start:`, updatedTimers.filter(t => t.isActive).map(t => t.taskId));
@@ -1651,7 +1679,7 @@ Output ONLY valid JSON in this exact format:
     
     // Sync to database (debounced, don't fail timer start if sync fails)
     try {
-      debouncedSync();
+      syncAmbitionDataToDatabase({ reason: 'timer_started' });
     } catch (syncError) {
       console.error(`[Timer] Error scheduling sync:`, syncError);
       console.warn(`[Timer] ⚠️ Timer started successfully but sync scheduling failed - timer will continue to work locally`);
@@ -1679,11 +1707,12 @@ Output ONLY valid JSON in this exact format:
     
     setTaskTimersState(updatedTimers);
     await AsyncStorage.setItem(STORAGE_KEYS.TASK_TIMERS, JSON.stringify(updatedTimers));
+    setIsDirty(true);
     
     console.log(`[Timer] Timer stopped successfully for task ${taskId}`);
     
     // Sync to database (debounced)
-    debouncedSync();
+    syncAmbitionDataToDatabase({ reason: 'timer_stopped' });
   };
 
   const getTaskTimer = (taskId: string): TaskTimer | null => {
@@ -1755,6 +1784,7 @@ Output ONLY valid JSON in this exact format:
     
     setCompletedTasksState(newCompletedTasks);
     await AsyncStorage.setItem(STORAGE_KEYS.COMPLETED_TASKS, JSON.stringify(newCompletedTasks));
+    setIsDirty(true);
 
     // Mark timer as completed if it exists
     if (timer && !completedTasks.includes(taskId)) {
@@ -1769,6 +1799,7 @@ Output ONLY valid JSON in this exact format:
       );
       setTaskTimersState(updatedTimers);
       await AsyncStorage.setItem(STORAGE_KEYS.TASK_TIMERS, JSON.stringify(updatedTimers));
+      setIsDirty(true);
     }
 
     // Update streak if task was completed (not uncompleted)
@@ -1778,7 +1809,7 @@ Output ONLY valid JSON in this exact format:
     }
     
     // Sync to database immediately (task completion is important)
-    await syncAmbitionDataToDatabase(true);
+    await syncAmbitionDataToDatabase({ forceSync: true, reason: 'task_completed' });
     
     return true; // Return true to indicate toggle was successful
   };
@@ -1805,14 +1836,15 @@ Output ONLY valid JSON in this exact format:
 
     setStreakDataState(newStreakData);
     await AsyncStorage.setItem(STORAGE_KEYS.STREAK_DATA, JSON.stringify(newStreakData));
+    setIsDirty(true);
     
     // Track streak achievement
     if (newStreak > 1) {
       analytics.trackStreakAchieved(newStreak);
     }
     
-    // Sync to database (debounced)
-    debouncedSync();
+    // Sync to database
+    syncAmbitionDataToDatabase({ reason: 'streak_updated' });
   };
 
   const getProgress = () => {
@@ -1977,7 +2009,8 @@ Output ONLY valid JSON in this exact format:
       setTaskTimersState([]);
       
       // Sync to database immediately after reset
-      await syncAmbitionDataToDatabase(true);
+      setIsDirty(true);
+      await syncAmbitionDataToDatabase({ forceSync: true, reason: 'progress_reset' });
     } catch (error) {
       console.error('Error resetting progress:', error);
     }
@@ -2024,9 +2057,10 @@ Output ONLY valid JSON in this exact format:
       setCompletedTasksState([]);
       setStreakDataState({ lastCompletionDate: '', streak: 0 });
       setTaskTimersState([]);
+      setIsDirty(true);
       
       // Sync to database immediately after clearing (will sync empty/null values)
-      await syncAmbitionDataToDatabase(true);
+      await syncAmbitionDataToDatabase({ forceSync: true, reason: 'clear_all' });
     } catch (error) {
       console.error('Error clearing data:', error);
     }
@@ -2063,7 +2097,7 @@ Output ONLY valid JSON in this exact format:
     isMilestoneUnlocked,
     isPhaseUnlocked,
     reloadFromStorage: loadDataFromStorage,
-    syncToDatabase: () => syncAmbitionDataToDatabase(true),
+    syncToDatabase: () => syncAmbitionDataToDatabase({ forceSync: true, reason: 'manual' }),
   };
 });
 
