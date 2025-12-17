@@ -4,6 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFonts, LexendDeca_400Regular, LexendDeca_600SemiBold } from '@expo-google-fonts/lexend-deca';
+import { useUnifiedUser } from '../lib/unified-user-store';
 
 interface TrailSegment {
   x: Animated.Value;
@@ -27,6 +28,7 @@ export default function WelcomeScreen() {
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
   const [showNoRoadmapMessage, setShowNoRoadmapMessage] = useState(false);
+  const { user, isRegistered, isHydrated: userHydrated } = useUnifiedUser();
   
   // Check if we should show the "no roadmap" message
   useEffect(() => {
@@ -412,6 +414,10 @@ export default function WelcomeScreen() {
   };
 
   const handleSignIn = () => {
+    // If the user is already signed in and the store is hydrated, don't push to auth again
+    if (userHydrated && isRegistered) {
+      return;
+    }
     router.push('/auth?mode=signin&from=welcome');
   };
 
@@ -423,9 +429,18 @@ export default function WelcomeScreen() {
       <TouchableOpacity
         style={dynamicStyles.signInButton}
         onPress={handleSignIn}
-        activeOpacity={0.7}
+        activeOpacity={userHydrated && isRegistered ? 1 : 0.7}
+        disabled={userHydrated && isRegistered}
       >
-        <Text style={styles.signInButtonText}>Sign In</Text>
+        <Text style={styles.signInButtonText}>
+          {userHydrated
+            ? isRegistered
+              ? user?.email
+                ? `Signed in as ${user.email}`
+                : 'Signed in'
+              : 'Sign In'
+            : 'Checking sign-in…'}
+        </Text>
       </TouchableOpacity>
       
       {/* Original flowing background */}
